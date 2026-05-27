@@ -8,7 +8,7 @@ import { toast } from "sonner";
 import { Player } from "@/components/player";
 import { usePlaylistStore } from "@/lib/store";
 import { EmptyState } from "@/components/empty-state";
-import { detectStreamType, proxiedStreamUrl } from "@/lib/stream";
+import { detectStreamType, proxiedStreamUrl, type StreamType } from "@/lib/stream";
 
 function formatTime(seconds: number): string {
   if (!Number.isFinite(seconds) || seconds < 0) return "0:00";
@@ -58,6 +58,22 @@ export default function WatchPage({
     setResumeForId(id);
     setResumeChoice(null);
   }
+
+  // Local overrides triggered by the player's error UI (try without proxy /
+  // force the HLS engine). Reset on channel change.
+  const [overrideProxy, setOverrideProxy] = useState<boolean | null>(null);
+  const [overrideStreamType, setOverrideStreamType] = useState<StreamType | null>(null);
+  const [overrideForId, setOverrideForId] = useState<string | null>(null);
+  if (overrideForId !== id) {
+    setOverrideForId(id);
+    setOverrideProxy(null);
+    setOverrideStreamType(null);
+  }
+  const effectiveProxy = overrideProxy ?? proxyStreams;
+  const computedStreamType = channel
+    ? detectStreamType(channel.url, !isVod)
+    : "hls";
+  const effectiveStreamType = overrideStreamType ?? computedStreamType;
 
   const needsResumePrompt = Boolean(isVod && savedPosition && savedPosition > 30);
   const showResumeOverlay = needsResumePrompt && resumeChoice === null;
@@ -335,9 +351,10 @@ export default function WatchPage({
         {/* Render player as soon as we know we don't need to prompt, or once a choice was made */}
         {!needsResumePrompt || resumeChoice !== null ? (
           <Player
-            key={`${channel.id}-${resumeChoice ?? "auto"}-${proxyStreams ? "p" : "d"}`}
-            src={proxyStreams ? proxiedStreamUrl(channel.url) : channel.url}
-            streamType={detectStreamType(channel.url, !isVod)}
+            key={`${channel.id}-${resumeChoice ?? "auto"}-${effectiveProxy ? "p" : "d"}-${effectiveStreamType}`}
+            src={effectiveProxy ? proxiedStreamUrl(channel.url) : channel.url}
+            streamType={effectiveStreamType}
+            codecHint={`${channel.name} ${channel.group}`}
             poster={channel.logo}
             startTime={resumeChoice === "resume" ? savedPosition : undefined}
             isVod={isVod}
@@ -347,6 +364,18 @@ export default function WatchPage({
             topActions={topActions}
             onTimeUpdate={onTime}
             onEnded={onPlayerEnded}
+            onTryDirect={() => {
+              setOverrideProxy(!effectiveProxy);
+              toast(
+                effectiveProxy
+                  ? "Tentative directe (sans proxy)…"
+                  : "Tentative via proxy…"
+              );
+            }}
+            onForceHls={() => {
+              setOverrideStreamType("hls");
+              toast("Tentative avec moteur HLS…");
+            }}
           />
         ) : null}
 

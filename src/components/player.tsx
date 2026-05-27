@@ -47,6 +47,12 @@ type Props = {
   isVod?: boolean;
   /** Stream type — picks the right engine (hls.js, mpegts.js or native). Default: "hls". */
   streamType?: StreamType;
+  /** Free-form text (channel name + group) used to surface codec hints (HEVC, etc.). */
+  codecHint?: string;
+  /** When set, called when the user clicks "Essayer sans proxy" in an error state. */
+  onTryDirect?: () => void;
+  /** When set, called when the user clicks "Forcer HLS" — try hls.js even on .ts URLs. */
+  onForceHls?: () => void;
   /** Title shown in the always-visible top bar (especially useful in fullscreen). */
   title?: string;
   /** Subtitle / context shown under the title in the top bar. */
@@ -81,6 +87,9 @@ export function Player({
   startTime,
   isVod,
   streamType = "hls",
+  codecHint,
+  onTryDirect,
+  onForceHls,
   title,
   subtitle,
   onBack,
@@ -141,6 +150,13 @@ export function Player({
       ? "MPEG-TS non supporté par ce navigateur (MSE indisponible)"
       : null;
   const displayedError = errorMsg ?? capabilityError;
+
+  // Codec hints — most browsers can't play H.265/HEVC in MSE without OS-level
+  // support. Detect from the channel name / group string and surface a tip.
+  const hevcHint = useMemo(() => {
+    if (!codecHint) return false;
+    return /\b(hevc|h\.?265|x265)\b/i.test(codecHint);
+  }, [codecHint]);
 
   const subUploadRef = useRef<HTMLInputElement>(null);
 
@@ -214,11 +230,15 @@ export function Player({
       player.attachMediaElement(video);
       player.load();
 
-      player.on(mpegts.Events.ERROR, (type: string, detail: string) => {
-        const msg = `Erreur stream (${type}/${detail})`;
-        setErrorMsg(msg);
-        onError?.(msg);
-      });
+      player.on(
+        mpegts.Events.ERROR,
+        (type: string, detail: string, info?: { msg?: string; code?: number }) => {
+          const extra = info?.msg ? ` — ${info.msg}` : "";
+          const msg = `${type} · ${detail}${extra}`;
+          setErrorMsg(msg);
+          onError?.(msg);
+        }
+      );
 
       video.play().catch(() => {});
 
@@ -742,21 +762,61 @@ export function Player({
       ) : null}
 
       {displayedError ? (
-        <div className="absolute inset-0 grid place-items-center bg-black/85 backdrop-blur-sm">
-          <div className="text-center max-w-md px-6">
-            <p className="text-red-300 mb-2 font-semibold">Lecture impossible</p>
-            <p className="text-sm text-muted mb-4">{displayedError}</p>
-            <button
-              type="button"
-              onClick={() => {
-                setErrorMsg(null);
-                setRetryNonce((n) => n + 1);
-              }}
-              className="inline-flex items-center gap-2 h-10 px-4 rounded-md bg-foreground text-background font-semibold hover:bg-foreground/85 transition-colors"
-            >
-              <RotateCw size={14} />
-              Réessayer
-            </button>
+        <div className="absolute inset-0 z-50 grid place-items-center bg-black/90 backdrop-blur-sm px-4">
+          <div className="text-center max-w-lg w-full">
+            <p className="text-red-300 mb-2 font-semibold text-lg">Lecture impossible</p>
+            <p className="text-sm text-muted mb-4 font-mono break-words">
+              {displayedError}
+            </p>
+
+            {hevcHint ? (
+              <div className="text-left text-sm bg-amber-500/10 border border-amber-500/30 text-amber-200 rounded-lg p-3 mb-4">
+                <p className="font-semibold mb-1">
+                  ⚠️ Cette chaîne est probablement encodée en HEVC (H.265)
+                </p>
+                <p className="text-xs text-amber-200/80">
+                  Chrome et Firefox sur Windows ne décodent pas HEVC sans les
+                  extensions OS payantes. Cherche la même chaîne dans un groupe
+                  <code className="mx-1 px-1 bg-black/40 rounded">H264</code>
+                  ou <code className="px-1 bg-black/40 rounded">SD/HD</code>{" "}
+                  classique — elles marchent partout.
+                </p>
+              </div>
+            ) : null}
+
+            <div className="flex items-center justify-center gap-2 flex-wrap">
+              <button
+                type="button"
+                onClick={() => {
+                  setErrorMsg(null);
+                  setRetryNonce((n) => n + 1);
+                }}
+                className="inline-flex items-center gap-2 h-10 px-4 rounded-md bg-foreground text-background font-semibold hover:bg-foreground/85 transition-colors"
+              >
+                <RotateCw size={14} />
+                Réessayer
+              </button>
+              {onTryDirect ? (
+                <button
+                  type="button"
+                  onClick={onTryDirect}
+                  className="inline-flex items-center gap-2 h-10 px-4 rounded-md border border-border bg-card hover:bg-card-hover text-sm transition-colors"
+                  title="Essayer sans passer par le proxy local"
+                >
+                  Sans proxy
+                </button>
+              ) : null}
+              {onForceHls && streamType === "mpegts" ? (
+                <button
+                  type="button"
+                  onClick={onForceHls}
+                  className="inline-flex items-center gap-2 h-10 px-4 rounded-md border border-border bg-card hover:bg-card-hover text-sm transition-colors"
+                  title="Essayer de lire avec hls.js (au cas où le flux est en réalité du HLS)"
+                >
+                  Essayer en HLS
+                </button>
+              ) : null}
+            </div>
           </div>
         </div>
       ) : null}
