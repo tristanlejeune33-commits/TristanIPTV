@@ -3,8 +3,10 @@
 import Link from "next/link";
 import { motion } from "framer-motion";
 import { Play, Heart } from "lucide-react";
+import { toast } from "sonner";
 import type { Channel } from "@/lib/m3u-parser";
 import { usePlaylistStore } from "@/lib/store";
+import { ChannelThumbnail } from "./channel-thumbnail";
 
 export function ChannelCard({
   channel,
@@ -22,6 +24,15 @@ export function ChannelCard({
     lg: "w-72 h-40",
   }[size];
 
+  function onFavClick(e: React.MouseEvent) {
+    e.preventDefault();
+    e.stopPropagation();
+    toggleFav(channel.id);
+    toast(isFav ? "Retiré des favoris" : "Ajouté aux favoris", {
+      description: channel.name,
+    });
+  }
+
   return (
     <motion.div
       whileHover={{ scale: 1.06, zIndex: 10 }}
@@ -32,25 +43,7 @@ export function ChannelCard({
         href={`/watch/${encodeURIComponent(channel.id)}`}
         className={`${dims} relative block overflow-hidden rounded-lg border border-border bg-card`}
       >
-        {channel.logo ? (
-          // eslint-disable-next-line @next/next/no-img-element
-          <img
-            src={channel.logo}
-            alt={channel.name}
-            referrerPolicy="no-referrer"
-            className="absolute inset-0 w-full h-full object-contain p-3 bg-gradient-to-br from-card to-[#0d0d0d]"
-            loading="lazy"
-            onError={(e) => {
-              (e.currentTarget as HTMLImageElement).style.display = "none";
-            }}
-          />
-        ) : (
-          <div className="absolute inset-0 grid place-items-center bg-gradient-to-br from-[#1a1a1a] to-[#0a0a0a]">
-            <span className="text-2xl font-black text-muted">
-              {channel.name.slice(0, 2).toUpperCase()}
-            </span>
-          </div>
-        )}
+        <ChannelThumbnail channel={channel} className="absolute inset-0 w-full h-full" />
 
         <div className="absolute inset-0 bg-gradient-to-t from-black/90 via-black/40 to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-200" />
 
@@ -62,10 +55,7 @@ export function ChannelCard({
             <button
               type="button"
               aria-label={isFav ? "Retirer des favoris" : "Ajouter aux favoris"}
-              onClick={(e) => {
-                e.preventDefault();
-                toggleFav(channel.id);
-              }}
+              onClick={onFavClick}
               className={`h-8 w-8 rounded-full border grid place-items-center transition-colors ${
                 isFav
                   ? "border-[var(--accent)] bg-[var(--accent)]/20 text-[var(--accent)]"

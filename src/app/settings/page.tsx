@@ -1,8 +1,9 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { Loader2, Save, Trash2, ExternalLink } from "lucide-react";
+import { toast } from "sonner";
 import { usePlaylistStore } from "@/lib/store";
 
 export default function SettingsPage() {
@@ -17,19 +18,27 @@ export default function SettingsPage() {
   const history = usePlaylistStore((s) => s.watchHistory);
 
   const [input, setInput] = useState(currentUrl ?? "");
-  const [saved, setSaved] = useState(false);
+
+  // Surface async errors as toasts
+  useEffect(() => {
+    if (error) {
+      toast.error("Impossible de charger la playlist", { description: error });
+    }
+  }, [error]);
 
   function save() {
     const trimmed = input.trim();
     if (!trimmed) return;
     setM3uUrl(trimmed);
-    setSaved(true);
-    setTimeout(() => setSaved(false), 2000);
+    toast.success("Lien sauvegardé", {
+      description: "Chargement de la playlist en cours…",
+    });
   }
 
   function clearAll() {
     setM3uUrl(null);
     setInput("");
+    toast("Lien supprimé");
   }
 
   return (
@@ -46,7 +55,7 @@ export default function SettingsPage() {
       <section className="bg-card border border-border rounded-2xl p-6 md:p-8 mb-8">
         <h2 className="text-lg font-semibold mb-2">Lien M3U</h2>
         <p className="text-sm text-muted mb-4">
-          Colle ici l'URL de ta playlist (ton ami t'a donné un lien qui se
+          Colle ici l&apos;URL de ta playlist (ton ami t&apos;a donné un lien qui se
           termine en général par <code className="text-xs bg-background px-1.5 py-0.5 rounded">.m3u</code> ou{" "}
           <code className="text-xs bg-background px-1.5 py-0.5 rounded">.m3u8</code>).
           Le lien est sauvegardé uniquement dans ton navigateur.
@@ -82,17 +91,7 @@ export default function SettingsPage() {
                 Supprimer le lien
               </button>
             ) : null}
-
-            {saved ? (
-              <span className="text-sm text-emerald-400">Sauvegardé ✓</span>
-            ) : null}
           </div>
-
-          {error ? (
-            <div className="mt-2 p-3 rounded-md bg-red-500/10 border border-red-500/30 text-sm text-red-300">
-              <strong>Erreur :</strong> {error}
-            </div>
-          ) : null}
 
           {playlist && !loading && !error ? (
             <div className="mt-2 p-4 rounded-md bg-emerald-500/5 border border-emerald-500/20 text-sm space-y-1">
@@ -111,7 +110,7 @@ export default function SettingsPage() {
                 onClick={() => router.push("/")}
                 className="inline-flex items-center gap-1 text-emerald-300 hover:text-emerald-200 underline-offset-2 hover:underline mt-1"
               >
-                Aller à l'accueil <ExternalLink size={12} />
+                Aller à l&apos;accueil <ExternalLink size={12} />
               </button>
             </div>
           ) : null}
@@ -127,14 +126,31 @@ export default function SettingsPage() {
         <button
           type="button"
           onClick={() => {
-            if (confirm("Vider l'historique de lecture ?")) clearHistory();
+            if (confirm("Vider l'historique de lecture ?")) {
+              clearHistory();
+              toast("Historique vidé");
+            }
           }}
           disabled={history.length === 0}
           className="inline-flex items-center gap-2 h-10 px-4 rounded-md border border-border hover:bg-card-hover text-muted hover:text-foreground transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
         >
           <Trash2 size={14} />
-          Vider l'historique
+          Vider l&apos;historique
         </button>
+      </section>
+
+      <section className="bg-card border border-border rounded-2xl p-6 md:p-8 mb-8">
+        <h2 className="text-lg font-semibold mb-4">Raccourcis clavier</h2>
+        <div className="grid md:grid-cols-2 gap-3 text-sm">
+          <Shortcut keys={["⌘", "K"]} label="Command palette" />
+          <Shortcut keys={["Espace"]} label="Lecture / pause" />
+          <Shortcut keys={["M"]} label="Couper le son" />
+          <Shortcut keys={["F"]} label="Plein écran" />
+          <Shortcut keys={["P"]} label="Picture-in-picture" />
+          <Shortcut keys={["↑", "↓"]} label="Volume" />
+          <Shortcut keys={["←", "→"]} label="Chaîne précédente / suivante" />
+          <Shortcut keys={["L"]} label="Ajouter / retirer favori" />
+        </div>
       </section>
 
       <section className="text-sm text-muted">
@@ -142,7 +158,7 @@ export default function SettingsPage() {
         <ul className="space-y-1 list-disc list-inside">
           <li>
             Le lien M3U et tes préférences restent dans ton navigateur (rien
-            n'est envoyé à un serveur tiers).
+            n&apos;est envoyé à un serveur tiers).
           </li>
           <li>
             La playlist est récupérée via le proxy interne{" "}
@@ -163,6 +179,24 @@ function Stat({ label, value }: { label: string; value: number }) {
     <div className="bg-background border border-border rounded-lg p-4">
       <p className="text-xs uppercase tracking-widest text-muted mb-1">{label}</p>
       <p className="text-2xl font-bold font-mono">{value}</p>
+    </div>
+  );
+}
+
+function Shortcut({ keys, label }: { keys: string[]; label: string }) {
+  return (
+    <div className="flex items-center justify-between gap-3 px-3 py-2 bg-background border border-border rounded-md">
+      <span className="text-muted">{label}</span>
+      <span className="flex items-center gap-1">
+        {keys.map((k) => (
+          <kbd
+            key={k}
+            className="text-xs bg-card border border-border rounded px-1.5 py-0.5 font-mono"
+          >
+            {k}
+          </kbd>
+        ))}
+      </span>
     </div>
   );
 }

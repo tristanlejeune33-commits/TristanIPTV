@@ -1,10 +1,11 @@
 "use client";
 
-import { useMemo } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { usePlaylistStore } from "@/lib/store";
 import { Hero } from "@/components/hero";
 import { Rail } from "@/components/rail";
 import { EmptyState } from "@/components/empty-state";
+import { SkeletonHero, SkeletonRail } from "@/components/skeleton";
 
 export default function Home() {
   const playlist = usePlaylistStore((s) => s.playlist);
@@ -14,14 +15,20 @@ export default function Home() {
   const favorites = usePlaylistStore((s) => s.favorites);
   const history = usePlaylistStore((s) => s.watchHistory);
 
+  // Pick a featured channel on the client side only, refreshed roughly every 6h
+  const [timeBucket, setTimeBucket] = useState<number | null>(null);
+  useEffect(() => {
+    const compute = () => setTimeBucket(Math.floor(Date.now() / (1000 * 60 * 60 * 6)));
+    compute();
+    const id = window.setInterval(compute, 60 * 1000);
+    return () => window.clearInterval(id);
+  }, []);
+
   const featuredChannel = useMemo(() => {
-    if (!playlist || playlist.channels.length === 0) return null;
-    // Pick a "channel of the moment" — rotates every ~6h, stable within that window
-    const idx =
-      Math.floor(Date.now() / (1000 * 60 * 60 * 6)) %
-      playlist.channels.length;
+    if (!playlist || playlist.channels.length === 0 || timeBucket === null) return null;
+    const idx = timeBucket % playlist.channels.length;
     return playlist.channels[idx];
-  }, [playlist]);
+  }, [playlist, timeBucket]);
 
   const favoriteChannels = useMemo(() => {
     if (!playlist) return [];
@@ -49,12 +56,14 @@ export default function Home() {
     );
   }
 
-  if (loading) {
+  if (loading && !playlist) {
     return (
-      <div className="min-h-[60vh] grid place-items-center">
-        <div className="flex flex-col items-center gap-4">
-          <div className="h-10 w-10 border-4 border-border border-t-[var(--accent)] rounded-full animate-spin" />
-          <p className="text-sm text-muted">Chargement de la playlist…</p>
+      <div className="pb-20">
+        <SkeletonHero />
+        <div className="-mt-24 relative z-10 space-y-4">
+          <SkeletonRail />
+          <SkeletonRail />
+          <SkeletonRail />
         </div>
       </div>
     );

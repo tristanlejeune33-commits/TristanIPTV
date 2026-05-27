@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
-import { Search, Settings, Heart, Home as HomeIcon } from "lucide-react";
+import { Search, Settings, Heart, Home as HomeIcon, Layers, Command as CmdIcon } from "lucide-react";
 
 export function Topbar() {
   const pathname = usePathname();
@@ -50,6 +50,9 @@ export function Topbar() {
           <NavLink href="/" active={pathname === "/"} icon={<HomeIcon size={16} />}>
             Accueil
           </NavLink>
+          <NavLink href="/browse" active={pathname === "/browse"} icon={<Layers size={16} />}>
+            Parcourir
+          </NavLink>
           <NavLink
             href="/favorites"
             active={pathname === "/favorites"}
@@ -69,8 +72,11 @@ export function Topbar() {
               value={query}
               onChange={(e) => setQuery(e.target.value)}
               placeholder="Rechercher une chaîne…"
-              className="bg-card/80 border border-border rounded-full h-9 pl-9 pr-4 text-sm w-48 md:w-72 focus:outline-none focus:border-foreground/40 transition-colors placeholder:text-muted"
+              className="bg-card/80 border border-border rounded-full h-9 pl-9 pr-16 text-sm w-48 md:w-72 focus:outline-none focus:border-foreground/40 transition-colors placeholder:text-muted"
             />
+            <kbd className="hidden md:inline-flex absolute right-2 top-1/2 -translate-y-1/2 items-center gap-1 text-[10px] text-muted bg-background border border-border rounded px-1.5 py-0.5 pointer-events-none">
+              <CmdIcon size={10} />K
+            </kbd>
           </div>
           <Link
             href="/settings"
@@ -81,6 +87,14 @@ export function Topbar() {
           </Link>
         </form>
       </div>
+
+      {/* Mobile bottom-nav alternative kept inside topbar on small screens */}
+      <nav className="md:hidden flex items-center justify-around border-t border-border bg-background/80 backdrop-blur-md text-xs">
+        <MobileNavLink href="/" active={pathname === "/"} icon={<HomeIcon size={16} />} label="Accueil" />
+        <MobileNavLink href="/browse" active={pathname === "/browse"} icon={<Layers size={16} />} label="Parcourir" />
+        <MobileNavLink href="/favorites" active={pathname === "/favorites"} icon={<Heart size={16} />} label="Favoris" />
+        <MobileNavLink href="/settings" active={pathname === "/settings"} icon={<Settings size={16} />} label="Réglages" />
+      </nav>
     </header>
   );
 }
@@ -107,6 +121,30 @@ function NavLink({
     >
       {icon}
       {children}
+    </Link>
+  );
+}
+
+function MobileNavLink({
+  href,
+  label,
+  active,
+  icon,
+}: {
+  href: string;
+  label: string;
+  active: boolean;
+  icon: React.ReactNode;
+}) {
+  return (
+    <Link
+      href={href}
+      className={`flex-1 py-2 flex flex-col items-center gap-0.5 ${
+        active ? "text-foreground" : "text-muted"
+      }`}
+    >
+      {icon}
+      <span>{label}</span>
     </Link>
   );
 }
