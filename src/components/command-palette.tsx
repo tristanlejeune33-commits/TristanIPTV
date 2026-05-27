@@ -11,6 +11,8 @@ import {
   Layers,
   Trash2,
   Tv,
+  Radio,
+  Film,
 } from "lucide-react";
 import { toast } from "sonner";
 import { usePlaylistStore } from "@/lib/store";
@@ -44,24 +46,37 @@ export function CommandPalette() {
     setOpen(false);
   }
 
-  const channels = useMemo(() => {
-    if (!playlist) return [];
-    if (!query.trim()) return playlist.channels.slice(0, 8);
+  const matchesQuery = useMemo(() => {
     const tokens = query.toLowerCase().split(/\s+/).filter(Boolean);
-    return playlist.channels
-      .filter((c) => {
-        const hay = `${c.name} ${c.group}`.toLowerCase();
-        return tokens.every((t) => hay.includes(t));
-      })
-      .slice(0, 12);
-  }, [playlist, query]);
+    return (hay: string) =>
+      tokens.length === 0 || tokens.every((t) => hay.toLowerCase().includes(t));
+  }, [query]);
+
+  const liveChannels = useMemo(() => {
+    if (!playlist) return [];
+    const list = playlist.liveChannels.filter((c) => matchesQuery(`${c.name} ${c.group}`));
+    return query.trim() ? list.slice(0, 8) : list.slice(0, 5);
+  }, [playlist, matchesQuery, query]);
+
+  const movieChannels = useMemo(() => {
+    if (!playlist) return [];
+    const list = playlist.movieChannels.filter((c) => matchesQuery(`${c.name} ${c.group}`));
+    return query.trim() ? list.slice(0, 8) : list.slice(0, 5);
+  }, [playlist, matchesQuery, query]);
+
+  const shows = useMemo(() => {
+    if (!playlist) return [];
+    const list = playlist.showsSorted
+      .map((slug) => playlist.shows[slug])
+      .filter((s) => matchesQuery(s.show));
+    return query.trim() ? list.slice(0, 8) : list.slice(0, 5);
+  }, [playlist, matchesQuery, query]);
 
   const groups = useMemo(() => {
     if (!playlist) return [];
-    if (!query.trim()) return playlist.groupsSorted.slice(0, 6);
-    const q = query.toLowerCase();
-    return playlist.groupsSorted.filter((g) => g.toLowerCase().includes(q)).slice(0, 6);
-  }, [playlist, query]);
+    const list = playlist.groupsSorted.filter((g) => matchesQuery(g));
+    return list.slice(0, 5);
+  }, [playlist, matchesQuery]);
 
   function go(href: string) {
     closePalette();
@@ -72,7 +87,7 @@ export function CommandPalette() {
 
   return (
     <div
-      className="fixed inset-0 z-[100] bg-black/70 backdrop-blur-sm grid place-items-start pt-[12vh] px-4"
+      className="fixed inset-0 z-[100] bg-black/70 backdrop-blur-sm grid place-items-start pt-[10vh] px-4"
       onClick={closePalette}
     >
       <div
@@ -86,7 +101,7 @@ export function CommandPalette() {
               autoFocus
               value={query}
               onValueChange={setQuery}
-              placeholder="Rechercher une chaîne, une catégorie, une action…"
+              placeholder="Rechercher une chaîne, une série, une catégorie…"
               className="flex-1 h-12 bg-transparent text-sm outline-none placeholder:text-muted"
             />
             <kbd className="hidden md:inline-flex items-center gap-1 text-[10px] text-muted bg-background border border-border rounded px-1.5 py-0.5">
@@ -99,40 +114,66 @@ export function CommandPalette() {
               Aucun résultat
             </Command.Empty>
 
-            <Command.Group heading="Navigation" className="text-xs uppercase tracking-widest text-muted px-2 py-1">
+            <Section heading="Navigation">
               <Item icon={<HomeIcon size={14} />} label="Accueil" onSelect={() => go("/")} />
-              <Item icon={<Layers size={14} />} label="Parcourir les catégories" onSelect={() => go("/browse")} />
+              <Item icon={<Radio size={14} />} label="Chaînes en direct" onSelect={() => go("/live")} />
+              <Item icon={<Film size={14} />} label="Films" onSelect={() => go("/movies")} />
+              <Item icon={<Tv size={14} />} label="Séries" onSelect={() => go("/series")} />
+              <Item icon={<Layers size={14} />} label="Parcourir toutes les catégories" onSelect={() => go("/browse")} />
               <Item icon={<Heart size={14} />} label="Mes favoris" onSelect={() => go("/favorites")} />
               <Item icon={<Settings size={14} />} label="Paramètres" onSelect={() => go("/settings")} />
-            </Command.Group>
+            </Section>
 
-            {channels.length > 0 ? (
-              <Command.Group heading="Chaînes" className="text-xs uppercase tracking-widest text-muted px-2 py-1 mt-2">
-                {channels.map((c) => (
-                  <Command.Item
+            {liveChannels.length > 0 ? (
+              <Section heading="Chaînes en direct">
+                {liveChannels.map((c) => (
+                  <ChannelItem
                     key={c.id}
-                    value={`channel-${c.id}-${c.name}`}
+                    name={c.name}
+                    sub={c.group}
+                    isFrench={c.isFrench}
+                    seedId={c.id}
                     onSelect={() => go(`/watch/${encodeURIComponent(c.id)}`)}
-                    className="flex items-center gap-3 px-3 py-2 rounded-md aria-selected:bg-card-hover cursor-pointer"
-                  >
-                    <div
-                      className="h-8 w-8 rounded grid place-items-center shrink-0 text-[10px] font-bold text-white"
-                      style={{ background: getFallbackGradient(c.id) }}
-                    >
-                      {getChannelInitials(c.name)}
-                    </div>
-                    <div className="min-w-0 flex-1">
-                      <p className="text-sm truncate">{c.name}</p>
-                      <p className="text-xs text-muted truncate">{c.group}</p>
-                    </div>
-                    <Tv size={14} className="text-muted" />
-                  </Command.Item>
+                    icon={<Radio size={14} className="text-muted" />}
+                  />
                 ))}
-              </Command.Group>
+              </Section>
+            ) : null}
+
+            {movieChannels.length > 0 ? (
+              <Section heading="Films">
+                {movieChannels.map((c) => (
+                  <ChannelItem
+                    key={c.id}
+                    name={c.name}
+                    sub={c.group}
+                    isFrench={c.isFrench}
+                    seedId={c.id}
+                    onSelect={() => go(`/watch/${encodeURIComponent(c.id)}`)}
+                    icon={<Film size={14} className="text-muted" />}
+                  />
+                ))}
+              </Section>
+            ) : null}
+
+            {shows.length > 0 ? (
+              <Section heading="Séries">
+                {shows.map((s) => (
+                  <ChannelItem
+                    key={s.showSlug}
+                    name={s.show}
+                    sub={`${s.episodes.length} épisode${s.episodes.length > 1 ? "s" : ""}`}
+                    isFrench={s.isFrench}
+                    seedId={s.showSlug}
+                    onSelect={() => go(`/series/${encodeURIComponent(s.showSlug)}`)}
+                    icon={<Tv size={14} className="text-muted" />}
+                  />
+                ))}
+              </Section>
             ) : null}
 
             {groups.length > 0 ? (
-              <Command.Group heading="Catégories" className="text-xs uppercase tracking-widest text-muted px-2 py-1 mt-2">
+              <Section heading="Catégories">
                 {groups.map((g) => (
                   <Command.Item
                     key={g}
@@ -147,10 +188,10 @@ export function CommandPalette() {
                     </span>
                   </Command.Item>
                 ))}
-              </Command.Group>
+              </Section>
             ) : null}
 
-            <Command.Group heading="Actions" className="text-xs uppercase tracking-widest text-muted px-2 py-1 mt-2">
+            <Section heading="Actions">
               <Item
                 icon={<Trash2 size={14} />}
                 label="Vider l'historique de lecture"
@@ -161,7 +202,7 @@ export function CommandPalette() {
                 }}
                 danger
               />
-            </Command.Group>
+            </Section>
           </Command.List>
 
           <div className="flex items-center justify-between gap-2 px-4 py-2 border-t border-border text-[11px] text-muted">
@@ -186,6 +227,17 @@ export function CommandPalette() {
   );
 }
 
+function Section({ heading, children }: { heading: string; children: React.ReactNode }) {
+  return (
+    <Command.Group
+      heading={heading}
+      className="text-[10px] uppercase tracking-widest text-muted px-2 py-1 mt-2"
+    >
+      {children}
+    </Command.Group>
+  );
+}
+
 function Item({
   icon,
   label,
@@ -207,6 +259,45 @@ function Item({
     >
       <span className="text-muted">{icon}</span>
       <span className="text-sm">{label}</span>
+    </Command.Item>
+  );
+}
+
+function ChannelItem({
+  name,
+  sub,
+  isFrench,
+  seedId,
+  onSelect,
+  icon,
+}: {
+  name: string;
+  sub: string;
+  isFrench: boolean;
+  seedId: string;
+  onSelect: () => void;
+  icon: React.ReactNode;
+}) {
+  return (
+    <Command.Item
+      value={`${name}-${seedId}`}
+      onSelect={onSelect}
+      className="flex items-center gap-3 px-3 py-2 rounded-md aria-selected:bg-card-hover cursor-pointer"
+    >
+      <div
+        className="h-8 w-8 rounded grid place-items-center shrink-0 text-[10px] font-bold text-white"
+        style={{ background: getFallbackGradient(seedId) }}
+      >
+        {getChannelInitials(name)}
+      </div>
+      <div className="min-w-0 flex-1">
+        <p className="text-sm truncate flex items-center gap-1.5">
+          {name}
+          {isFrench ? <span className="text-[var(--accent)] text-[10px]">FR</span> : null}
+        </p>
+        <p className="text-xs text-muted truncate">{sub}</p>
+      </div>
+      {icon}
     </Command.Item>
   );
 }

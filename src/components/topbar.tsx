@@ -3,7 +3,26 @@
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
-import { Search, Settings, Heart, Home as HomeIcon, Layers, Command as CmdIcon } from "lucide-react";
+import {
+  Search,
+  Settings,
+  Heart,
+  Home as HomeIcon,
+  Layers,
+  Command as CmdIcon,
+  Radio,
+  Film,
+  Tv,
+} from "lucide-react";
+
+const PRIMARY_NAV = [
+  { href: "/", label: "Accueil", icon: HomeIcon },
+  { href: "/live", label: "Live TV", icon: Radio },
+  { href: "/movies", label: "Films", icon: Film },
+  { href: "/series", label: "Séries", icon: Tv },
+  { href: "/browse", label: "Parcourir", icon: Layers },
+  { href: "/favorites", label: "Favoris", icon: Heart },
+] as const;
 
 export function Topbar() {
   const pathname = usePathname();
@@ -36,30 +55,38 @@ export function Topbar() {
           : "bg-gradient-to-b from-black/80 to-transparent"
       }`}
     >
-      <div className="mx-auto max-w-[1600px] px-4 md:px-8 h-16 flex items-center gap-6">
+      <div className="mx-auto max-w-[1600px] px-4 md:px-8 h-16 flex items-center gap-4">
         <Link href="/" className="flex items-center gap-2 shrink-0">
           <span className="text-[var(--accent)] font-black text-2xl tracking-tighter">
             NETFLIX
           </span>
-          <span className="text-xs text-muted hidden md:inline-block uppercase tracking-widest">
+          <span className="text-xs text-muted hidden lg:inline-block uppercase tracking-widest">
             IPTV
           </span>
         </Link>
 
-        <nav className="hidden md:flex items-center gap-1 text-sm">
-          <NavLink href="/" active={pathname === "/"} icon={<HomeIcon size={16} />}>
-            Accueil
-          </NavLink>
-          <NavLink href="/browse" active={pathname === "/browse"} icon={<Layers size={16} />}>
-            Parcourir
-          </NavLink>
-          <NavLink
-            href="/favorites"
-            active={pathname === "/favorites"}
-            icon={<Heart size={16} />}
-          >
-            Mes favoris
-          </NavLink>
+        <nav className="hidden lg:flex items-center gap-1 text-sm">
+          {PRIMARY_NAV.map((item) => {
+            const active =
+              item.href === "/"
+                ? pathname === "/"
+                : pathname?.startsWith(item.href);
+            const Icon = item.icon;
+            return (
+              <Link
+                key={item.href}
+                href={item.href}
+                className={`flex items-center gap-2 px-3 py-2 rounded-full transition-colors ${
+                  active
+                    ? "text-foreground bg-card"
+                    : "text-muted hover:text-foreground"
+                }`}
+              >
+                <Icon size={16} />
+                {item.label}
+              </Link>
+            );
+          })}
         </nav>
 
         <form onSubmit={onSubmit} className="ml-auto flex items-center gap-3">
@@ -71,8 +98,8 @@ export function Topbar() {
             <input
               value={query}
               onChange={(e) => setQuery(e.target.value)}
-              placeholder="Rechercher une chaîne…"
-              className="bg-card/80 border border-border rounded-full h-9 pl-9 pr-16 text-sm w-48 md:w-72 focus:outline-none focus:border-foreground/40 transition-colors placeholder:text-muted"
+              placeholder="Rechercher…"
+              className="bg-card/80 border border-border rounded-full h-9 pl-9 pr-16 text-sm w-40 md:w-64 focus:outline-none focus:border-foreground/40 transition-colors placeholder:text-muted"
             />
             <kbd className="hidden md:inline-flex absolute right-2 top-1/2 -translate-y-1/2 items-center gap-1 text-[10px] text-muted bg-background border border-border rounded px-1.5 py-0.5 pointer-events-none">
               <CmdIcon size={10} />K
@@ -88,63 +115,30 @@ export function Topbar() {
         </form>
       </div>
 
-      {/* Mobile bottom-nav alternative kept inside topbar on small screens */}
-      <nav className="md:hidden flex items-center justify-around border-t border-border bg-background/80 backdrop-blur-md text-xs">
-        <MobileNavLink href="/" active={pathname === "/"} icon={<HomeIcon size={16} />} label="Accueil" />
-        <MobileNavLink href="/browse" active={pathname === "/browse"} icon={<Layers size={16} />} label="Parcourir" />
-        <MobileNavLink href="/favorites" active={pathname === "/favorites"} icon={<Heart size={16} />} label="Favoris" />
-        <MobileNavLink href="/settings" active={pathname === "/settings"} icon={<Settings size={16} />} label="Réglages" />
+      {/* Mobile + tablet horizontal nav */}
+      <nav className="lg:hidden flex items-center gap-1 overflow-x-auto no-scrollbar border-t border-border bg-background/80 backdrop-blur-md px-4 py-2 text-xs">
+        {PRIMARY_NAV.map((item) => {
+          const active =
+            item.href === "/"
+              ? pathname === "/"
+              : pathname?.startsWith(item.href);
+          const Icon = item.icon;
+          return (
+            <Link
+              key={item.href}
+              href={item.href}
+              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full shrink-0 transition-colors ${
+                active
+                  ? "bg-foreground text-background"
+                  : "text-muted hover:text-foreground"
+              }`}
+            >
+              <Icon size={14} />
+              {item.label}
+            </Link>
+          );
+        })}
       </nav>
     </header>
-  );
-}
-
-function NavLink({
-  href,
-  children,
-  active,
-  icon,
-}: {
-  href: string;
-  children: React.ReactNode;
-  active: boolean;
-  icon?: React.ReactNode;
-}) {
-  return (
-    <Link
-      href={href}
-      className={`flex items-center gap-2 px-3 py-2 rounded-full transition-colors ${
-        active
-          ? "text-foreground bg-card"
-          : "text-muted hover:text-foreground"
-      }`}
-    >
-      {icon}
-      {children}
-    </Link>
-  );
-}
-
-function MobileNavLink({
-  href,
-  label,
-  active,
-  icon,
-}: {
-  href: string;
-  label: string;
-  active: boolean;
-  icon: React.ReactNode;
-}) {
-  return (
-    <Link
-      href={href}
-      className={`flex-1 py-2 flex flex-col items-center gap-0.5 ${
-        active ? "text-foreground" : "text-muted"
-      }`}
-    >
-      {icon}
-      <span>{label}</span>
-    </Link>
   );
 }

@@ -1,13 +1,22 @@
 "use client";
 
-import { use, useCallback, useEffect, useMemo, useRef } from "react";
+import { use, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { ArrowLeft, Heart, SkipBack, SkipForward } from "lucide-react";
+import { ArrowLeft, Heart, SkipBack, SkipForward, RotateCw, Play } from "lucide-react";
 import { toast } from "sonner";
 import { Player } from "@/components/player";
 import { usePlaylistStore } from "@/lib/store";
 import { EmptyState } from "@/components/empty-state";
+
+function formatTime(seconds: number): string {
+  if (!Number.isFinite(seconds) || seconds < 0) return "0:00";
+  const h = Math.floor(seconds / 3600);
+  const m = Math.floor((seconds % 3600) / 60);
+  const s = Math.floor(seconds % 60);
+  if (h > 0) return `${h}:${String(m).padStart(2, "0")}:${String(s).padStart(2, "0")}`;
+  return `${m}:${String(s).padStart(2, "0")}`;
+}
 
 export default function WatchPage({
   params,
@@ -24,13 +33,35 @@ export default function WatchPage({
   const isFav = usePlaylistStore((s) => s.favorites.includes(id));
   const toggleFav = usePlaylistStore((s) => s.toggleFavorite);
   const markWatched = usePlaylistStore((s) => s.markWatched);
+  const history = usePlaylistStore((s) => s.watchHistory);
 
   const channel = useMemo(
     () => playlist?.channels.find((c) => c.id === id),
     [playlist, id]
   );
 
-  // Neighbouring channels for prev/next in the same category
+  const isVod = channel?.type === "movie" || channel?.type === "series";
+  const savedEntry = useMemo(
+    () => history.find((h) => h.channelId === id),
+    [history, id]
+  );
+  const savedPosition = savedEntry?.position;
+
+  // Resume overlay state — reset on channel change via the render-time "reset
+  // state when input changed" pattern instead of an effect.
+  const [resumeChoice, setResumeChoice] = useState<"resume" | "restart" | null>(null);
+  const [resumeForId, setResumeForId] = useState<string | null>(null);
+  if (resumeForId !== id) {
+    setResumeForId(id);
+    setResumeChoice(null);
+  }
+
+  const needsResumePrompt = Boolean(
+    isVod && savedPosition && savedPosition > 30
+  );
+  const showResumeOverlay = needsResumePrompt && resumeChoice === null;
+
+  // Neighbouring channels: prev/next within the same group
   const { prevChannel, nextChannel, position, totalInGroup } = useMemo(() => {
     if (!channel || !playlist) {
       return { prevChannel: null, nextChannel: null, position: 0, totalInGroup: 0 };
@@ -45,34 +76,57 @@ export default function WatchPage({
     };
   }, [channel, playlist]);
 
-  // Mark as watched on mount of a new channel
+  // For series episodes, prefer prev/next within the show
+  const { prevEpisode, nextEpisode } = useMemo(() => {
+    if (!channel || !playlist || channel.type !== "series" || !channel.seriesInfo) {
+      return { prevEpisode: null, nextEpisode: null };
+    }
+    const show = playlist.shows[channel.seriesInfo.showSlug];
+    if (!show) return { prevEpisode: null, nextEpisode: null };
+    const idx = show.episodes.findIndex((e) => e.id === channel.id);
+    return {
+      prevEpisode: idx > 0 ? show.episodes[idx - 1] : null,
+      nextEpisode: idx < show.episodes.length - 1 ? show.episodes[idx + 1] : null,
+    };
+  }, [channel, playlist]);
+
+  // Mark as watched on first visit to a channel
   const markedRef = useRef<string | null>(null);
   useEffect(() => {
     if (!channel) return;
     if (markedRef.current === channel.id) return;
     markedRef.current = channel.id;
-    markWatched(channel.id);
-  }, [channel, markWatched]);
+    // Don't clobber saved position when just opening the page
+    markWatched(channel.id, savedPosition);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [channel]);
 
   // Throttled position save
   const lastSaveRef = useRef(0);
-  function onTime(seconds: number) {
+  function onTime(seconds: number, duration: number) {
     if (!channel) return;
     const now = Date.now();
     if (now - lastSaveRef.current < 5000) return;
     lastSaveRef.current = now;
-    markWatched(channel.id, seconds);
+    // Only persist position for VOD with known duration
+    if (isVod && Number.isFinite(duration) && duration > 0) {
+      markWatched(channel.id, seconds);
+    } else {
+      markWatched(channel.id);
+    }
   }
 
   const goPrev = useCallback(() => {
-    if (prevChannel) router.push(`/watch/${encodeURIComponent(prevChannel.id)}`);
-  }, [prevChannel, router]);
+    const target = prevEpisode ?? prevChannel;
+    if (target) router.push(`/watch/${encodeURIComponent(target.id)}`);
+  }, [prevEpisode, prevChannel, router]);
 
   const goNext = useCallback(() => {
-    if (nextChannel) router.push(`/watch/${encodeURIComponent(nextChannel.id)}`);
-  }, [nextChannel, router]);
+    const target = nextEpisode ?? nextChannel;
+    if (target) router.push(`/watch/${encodeURIComponent(target.id)}`);
+  }, [nextEpisode, nextChannel, router]);
 
-  // Keyboard shortcuts for prev/next + favorite
+  // Keyboard shortcuts: prev/next/favorite
   useEffect(() => {
     function onKey(e: KeyboardEvent) {
       const target = e.target as HTMLElement | null;
@@ -135,6 +189,16 @@ export default function WatchPage({
     });
   }
 
+  const showsSeriesNav = channel.type === "series" && channel.seriesInfo;
+  const navTotal = showsSeriesNav
+    ? playlist.shows[channel.seriesInfo!.showSlug]?.episodes.length ?? totalInGroup
+    : totalInGroup;
+  const navPos = showsSeriesNav
+    ? (playlist.shows[channel.seriesInfo!.showSlug]?.episodes.findIndex(
+        (e) => e.id === channel.id
+      ) ?? -1) + 1
+    : position;
+
   return (
     <div className="fixed inset-0 bg-black flex flex-col">
       {/* Top bar */}
@@ -162,10 +226,24 @@ export default function WatchPage({
             />
           ) : null}
           <div className="min-w-0">
-            <p className="text-sm font-semibold truncate">{channel.name}</p>
+            <p className="text-sm font-semibold truncate">
+              {channel.name}
+              {channel.isFrench ? (
+                <span className="ml-2 text-[10px] text-[var(--accent)] font-mono">FR</span>
+              ) : null}
+            </p>
             <p className="text-xs text-muted truncate">
-              {channel.group}
-              {totalInGroup > 0 ? ` · ${position}/${totalInGroup}` : ""}
+              {showsSeriesNav ? (
+                <Link
+                  href={`/series/${encodeURIComponent(channel.seriesInfo!.showSlug)}`}
+                  className="hover:text-foreground transition-colors"
+                >
+                  Série · {channel.seriesInfo!.show}
+                </Link>
+              ) : (
+                channel.group
+              )}
+              {navTotal > 0 ? ` · ${navPos}/${navTotal}` : ""}
             </p>
           </div>
         </div>
@@ -174,20 +252,20 @@ export default function WatchPage({
           <button
             type="button"
             onClick={goPrev}
-            disabled={!prevChannel}
-            aria-label="Chaîne précédente"
+            disabled={!prevChannel && !prevEpisode}
+            aria-label={showsSeriesNav ? "Épisode précédent" : "Chaîne précédente"}
             className="h-10 w-10 grid place-items-center rounded-full border border-border bg-black/60 hover:bg-card-hover transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
-            title="Précédente (←)"
+            title={showsSeriesNav ? "Épisode précédent (←)" : "Précédente (←)"}
           >
             <SkipBack size={16} />
           </button>
           <button
             type="button"
             onClick={goNext}
-            disabled={!nextChannel}
-            aria-label="Chaîne suivante"
+            disabled={!nextChannel && !nextEpisode}
+            aria-label={showsSeriesNav ? "Épisode suivant" : "Chaîne suivante"}
             className="h-10 w-10 grid place-items-center rounded-full border border-border bg-black/60 hover:bg-card-hover transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
-            title="Suivante (→)"
+            title={showsSeriesNav ? "Épisode suivant (→)" : "Suivante (→)"}
           >
             <SkipForward size={16} />
           </button>
@@ -216,7 +294,51 @@ export default function WatchPage({
       </div>
 
       <div className="flex-1">
-        <Player src={channel.url} poster={channel.logo} onTimeUpdate={onTime} />
+        {/* Resume overlay covers the player until user chooses */}
+        {showResumeOverlay && savedPosition ? (
+          <div className="absolute inset-0 z-20 grid place-items-center bg-black/85 backdrop-blur-sm">
+            <div className="max-w-md w-full text-center px-6">
+              <p className="text-sm text-muted uppercase tracking-widest mb-2">
+                Reprendre la lecture ?
+              </p>
+              <h2 className="text-2xl md:text-3xl font-black mb-1 truncate">
+                {channel.name}
+              </h2>
+              <p className="text-muted text-sm mb-6">
+                Tu t&apos;es arrêté à {formatTime(savedPosition)}.
+              </p>
+              <div className="flex items-center justify-center gap-3 flex-wrap">
+                <button
+                  type="button"
+                  onClick={() => setResumeChoice("resume")}
+                  className="inline-flex items-center gap-2 h-12 px-6 rounded-md bg-foreground text-background font-semibold hover:bg-foreground/85 transition-colors"
+                >
+                  <Play size={16} fill="currentColor" />
+                  Reprendre à {formatTime(savedPosition)}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setResumeChoice("restart")}
+                  className="inline-flex items-center gap-2 h-12 px-6 rounded-md border border-border bg-card hover:bg-card-hover transition-colors text-sm"
+                >
+                  <RotateCw size={14} />
+                  Recommencer depuis le début
+                </button>
+              </div>
+            </div>
+          </div>
+        ) : null}
+
+        {/* Render player as soon as we know we don't need to prompt, or once a choice was made */}
+        {!needsResumePrompt || resumeChoice !== null ? (
+          <Player
+            key={`${channel.id}-${resumeChoice ?? "auto"}`}
+            src={channel.url}
+            poster={channel.logo}
+            startTime={resumeChoice === "resume" ? savedPosition : undefined}
+            onTimeUpdate={onTime}
+          />
+        ) : null}
       </div>
     </div>
   );

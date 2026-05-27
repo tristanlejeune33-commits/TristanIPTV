@@ -18,14 +18,17 @@ import {
 type Props = {
   src: string;
   poster?: string;
+  /** Seek to this position (seconds) when the video is ready. Used for VOD resume. */
+  startTime?: number;
   onError?: (msg: string) => void;
-  onTimeUpdate?: (seconds: number) => void;
+  onTimeUpdate?: (seconds: number, duration: number) => void;
 };
 
-export function Player({ src, poster, onError, onTimeUpdate }: Props) {
+export function Player({ src, poster, startTime, onError, onTimeUpdate }: Props) {
   const wrapperRef = useRef<HTMLDivElement>(null);
   const videoRef = useRef<HTMLVideoElement>(null);
   const hlsRef = useRef<Hls | null>(null);
+  const seekedRef = useRef(false);
 
   const [playing, setPlaying] = useState(false);
   const [muted, setMuted] = useState(false);
@@ -39,6 +42,17 @@ export function Player({ src, poster, onError, onTimeUpdate }: Props) {
   const [currentLevel, setCurrentLevel] = useState(-1);
   const [showLevels, setShowLevels] = useState(false);
 
+  // Seek to startTime once the video is ready
+  function trySeek() {
+    const v = videoRef.current;
+    if (!v || seekedRef.current) return;
+    if (!startTime || startTime < 1) return;
+    if (!Number.isFinite(v.duration) || v.duration === 0) return;
+    if (startTime >= v.duration - 5) return;
+    v.currentTime = startTime;
+    seekedRef.current = true;
+  }
+
   // Setup HLS / native playback
   useEffect(() => {
     const video = videoRef.current;
@@ -46,6 +60,7 @@ export function Player({ src, poster, onError, onTimeUpdate }: Props) {
 
     setErrorMsg(null);
     setBuffering(true);
+    seekedRef.current = false;
 
     // Native HLS (Safari/iOS)
     if (video.canPlayType("application/vnd.apple.mpegurl")) {
@@ -114,11 +129,12 @@ export function Player({ src, poster, onError, onTimeUpdate }: Props) {
       setMuted(video.muted);
       setVolume(video.volume);
     };
-    const onTime = () => onTimeUpdate?.(video.currentTime);
+    const onTime = () => onTimeUpdate?.(video.currentTime, video.duration);
     const onWait = () => setBuffering(true);
     const onPlaying = () => setBuffering(false);
     const onEnterPip = () => setPip(true);
     const onLeavePip = () => setPip(false);
+    const onLoadedMeta = () => trySeek();
 
     video.addEventListener("play", onPlay);
     video.addEventListener("pause", onPause);
@@ -129,6 +145,7 @@ export function Player({ src, poster, onError, onTimeUpdate }: Props) {
     video.addEventListener("canplay", onPlaying);
     video.addEventListener("enterpictureinpicture", onEnterPip);
     video.addEventListener("leavepictureinpicture", onLeavePip);
+    video.addEventListener("loadedmetadata", onLoadedMeta);
 
     return () => {
       video.removeEventListener("play", onPlay);
@@ -140,8 +157,10 @@ export function Player({ src, poster, onError, onTimeUpdate }: Props) {
       video.removeEventListener("canplay", onPlaying);
       video.removeEventListener("enterpictureinpicture", onEnterPip);
       video.removeEventListener("leavepictureinpicture", onLeavePip);
+      video.removeEventListener("loadedmetadata", onLoadedMeta);
     };
-  }, [onTimeUpdate]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [onTimeUpdate, startTime]);
 
   // Fullscreen state sync
   useEffect(() => {
@@ -204,7 +223,6 @@ export function Player({ src, poster, onError, onTimeUpdate }: Props) {
   // Keyboard shortcuts
   useEffect(() => {
     function onKey(e: KeyboardEvent) {
-      // ignore when typing
       const target = e.target as HTMLElement | null;
       if (target && /^(INPUT|TEXTAREA|SELECT)$/.test(target.tagName)) return;
 
@@ -253,7 +271,6 @@ export function Player({ src, poster, onError, onTimeUpdate }: Props) {
         onClick={togglePlay}
       />
 
-      {/* Buffering spinner */}
       {buffering && !errorMsg ? (
         <div className="pointer-events-none absolute inset-0 grid place-items-center">
           <Loader2 size={40} className="animate-spin text-white/70" />
@@ -322,9 +339,7 @@ export function Player({ src, poster, onError, onTimeUpdate }: Props) {
                   className="h-10 px-3 rounded-full border border-border bg-black/50 hover:bg-card-hover transition-colors text-xs flex items-center gap-1.5"
                 >
                   <SettingsIcon size={14} />
-                  {currentLevel === -1
-                    ? "Auto"
-                    : `${levels[currentLevel]?.height ?? "?"}p`}
+                  {currentLevel === -1 ? "Auto" : `${levels[currentLevel]?.height ?? "?"}p`}
                 </button>
 
                 {showLevels ? (
@@ -340,9 +355,7 @@ export function Player({ src, poster, onError, onTimeUpdate }: Props) {
                       .map(({ lvl, idx }) => (
                         <LevelOption
                           key={idx}
-                          label={`${lvl.height ?? "?"}p · ${Math.round(
-                            (lvl.bitrate ?? 0) / 1000
-                          )} kbps`}
+                          label={`${lvl.height ?? "?"}p · ${Math.round((lvl.bitrate ?? 0) / 1000)} kbps`}
                           active={currentLevel === idx}
                           onClick={() => pickLevel(idx)}
                         />
