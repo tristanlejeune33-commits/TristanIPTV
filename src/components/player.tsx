@@ -6,6 +6,8 @@ import Hls, {
   type Level,
   type MediaPlaylist,
 } from "hls.js";
+import mpegts from "mpegts.js";
+import type { StreamType } from "@/lib/stream";
 import {
   Play,
   Pause,
@@ -43,6 +45,8 @@ type Props = {
   startTime?: number;
   /** Hint that this is a VOD source (movie/episode) — enables seek bar, speed, etc. */
   isVod?: boolean;
+  /** Stream type — picks the right engine (hls.js, mpegts.js or native). Default: "hls". */
+  streamType?: StreamType;
   /** Title shown in the always-visible top bar (especially useful in fullscreen). */
   title?: string;
   /** Subtitle / context shown under the title in the top bar. */
@@ -76,6 +80,7 @@ export function Player({
   poster,
   startTime,
   isVod,
+  streamType = "hls",
   title,
   subtitle,
   onBack,
@@ -87,6 +92,7 @@ export function Player({
   const wrapperRef = useRef<HTMLDivElement>(null);
   const videoRef = useRef<HTMLVideoElement>(null);
   const hlsRef = useRef<Hls | null>(null);
+  const mpegtsRef = useRef<ReturnType<typeof mpegts.createPlayer> | null>(null);
   const seekedRef = useRef(false);
 
   const [playing, setPlaying] = useState(false);
@@ -121,6 +127,21 @@ export function Player({
   const [seekFlash, setSeekFlash] = useState<{ side: "left" | "right"; nonce: number } | null>(null);
   const [showShortcuts, setShowShortcuts] = useState(false);
 
+  // Detect MSE support for MPEG-TS once — derive a static capability flag
+  const mpegtsSupported = useMemo(() => {
+    if (typeof window === "undefined") return false;
+    try {
+      return mpegts.getFeatureList().mseLivePlayback === true;
+    } catch {
+      return false;
+    }
+  }, []);
+  const capabilityError =
+    streamType === "mpegts" && !mpegtsSupported
+      ? "MPEG-TS non supporté par ce navigateur (MSE indisponible)"
+      : null;
+  const displayedError = errorMsg ?? capabilityError;
+
   const subUploadRef = useRef<HTMLInputElement>(null);
 
   // Seek to startTime once the video is ready
@@ -134,7 +155,7 @@ export function Player({
     seekedRef.current = true;
   }
 
-  // Setup HLS / native playback
+  // Setup playback (HLS / MPEG-TS / native) based on streamType
   useEffect(() => {
     const video = videoRef.current;
     if (!video) return;
@@ -149,11 +170,74 @@ export function Player({
     setAudioTrack(-1);
     setSubtitleTrack(-1);
 
-    // Native HLS (Safari/iOS)
+    function destroyAll() {
+      if (hlsRef.current) {
+        try {
+          hlsRef.current.destroy();
+        } catch {}
+        hlsRef.current = null;
+      }
+      if (mpegtsRef.current) {
+        try {
+          mpegtsRef.current.pause();
+          mpegtsRef.current.unload();
+          mpegtsRef.current.detachMediaElement();
+          mpegtsRef.current.destroy();
+        } catch {}
+        mpegtsRef.current = null;
+      }
+    }
+
+    // ------- MPEG-TS (live IPTV with raw .ts streams) -------
+    if (streamType === "mpegts") {
+      // Capability is checked at render time — `displayedError` will show the
+      // unsupported message without us touching state here.
+      if (!mpegts.getFeatureList().mseLivePlayback) return;
+
+      const player = mpegts.createPlayer(
+        {
+          type: "mse",
+          isLive: !isVod,
+          url: src,
+        },
+        {
+          enableWorker: true,
+          enableStashBuffer: false, // lower latency for live
+          lazyLoad: false,
+          autoCleanupSourceBuffer: true,
+          liveBufferLatencyChasing: !isVod,
+          liveBufferLatencyMaxLatency: 4,
+          liveBufferLatencyMinRemain: 0.5,
+        }
+      );
+      mpegtsRef.current = player;
+      player.attachMediaElement(video);
+      player.load();
+
+      player.on(mpegts.Events.ERROR, (type: string, detail: string) => {
+        const msg = `Erreur stream (${type}/${detail})`;
+        setErrorMsg(msg);
+        onError?.(msg);
+      });
+
+      video.play().catch(() => {});
+
+      return () => destroyAll();
+    }
+
+    // ------- Native (mp4/mkv/webm) -------
+    if (streamType === "native") {
+      video.src = src;
+      video.play().catch(() => {});
+      return () => destroyAll();
+    }
+
+    // ------- HLS (default) -------
+    // Safari has native HLS support — use that.
     if (video.canPlayType("application/vnd.apple.mpegurl")) {
       video.src = src;
       video.play().catch(() => {});
-      return;
+      return () => destroyAll();
     }
 
     if (Hls.isSupported()) {
@@ -223,16 +307,14 @@ export function Player({
         }
       });
 
-      return () => {
-        hls.destroy();
-        hlsRef.current = null;
-      };
+      return () => destroyAll();
     }
 
-    // Non-HLS fallback
+    // Last-resort fallback
     video.src = src;
     video.play().catch(() => {});
-  }, [src, retryNonce, onError]);
+    return () => destroyAll();
+  }, [src, streamType, isVod, retryNonce, onError]);
 
   // Native video events
   useEffect(() => {
@@ -648,7 +730,7 @@ export function Player({
       ) : null}
 
       {/* Buffering spinner */}
-      {buffering && !errorMsg ? (
+      {buffering && !displayedError ? (
         <div className="pointer-events-none absolute inset-0 grid place-items-center">
           <div className="flex flex-col items-center gap-3 bg-black/40 backdrop-blur-sm px-6 py-4 rounded-2xl">
             <Loader2 size={36} className="animate-spin text-white" />
@@ -659,11 +741,11 @@ export function Player({
         </div>
       ) : null}
 
-      {errorMsg ? (
+      {displayedError ? (
         <div className="absolute inset-0 grid place-items-center bg-black/85 backdrop-blur-sm">
           <div className="text-center max-w-md px-6">
             <p className="text-red-300 mb-2 font-semibold">Lecture impossible</p>
-            <p className="text-sm text-muted mb-4">{errorMsg}</p>
+            <p className="text-sm text-muted mb-4">{displayedError}</p>
             <button
               type="button"
               onClick={() => {

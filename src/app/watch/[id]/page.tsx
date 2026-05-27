@@ -8,7 +8,7 @@ import { toast } from "sonner";
 import { Player } from "@/components/player";
 import { usePlaylistStore } from "@/lib/store";
 import { EmptyState } from "@/components/empty-state";
-import { proxiedStreamUrl } from "@/lib/stream";
+import { detectStreamType, proxiedStreamUrl } from "@/lib/stream";
 
 function formatTime(seconds: number): string {
   if (!Number.isFinite(seconds) || seconds < 0) return "0:00";
@@ -337,6 +337,7 @@ export default function WatchPage({
           <Player
             key={`${channel.id}-${resumeChoice ?? "auto"}-${proxyStreams ? "p" : "d"}`}
             src={proxyStreams ? proxiedStreamUrl(channel.url) : channel.url}
+            streamType={detectStreamType(channel.url, !isVod)}
             poster={channel.logo}
             startTime={resumeChoice === "resume" ? savedPosition : undefined}
             isVod={isVod}
