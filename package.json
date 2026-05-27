@@ -1,5 +1,5 @@
 {
-  "name": "tristan-iptv",
+  "name": "netflix",
   "version": "0.1.0",
   "private": true,
   "scripts": {
@@ -9,16 +9,12 @@
     "lint": "eslint"
   },
   "dependencies": {
-    "cmdk": "^1.1.1",
     "framer-motion": "^12.40.0",
-    "fuse.js": "^7.4.1",
     "hls.js": "^1.6.16",
     "lucide-react": "^1.16.0",
-    "mpegts.js": "^1.8.0",
     "next": "16.2.6",
     "react": "19.2.4",
     "react-dom": "19.2.4",
-    "sonner": "^2.0.7",
     "zustand": "^5.0.13"
   },
   "devDependencies": {
