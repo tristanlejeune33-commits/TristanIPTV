@@ -16,6 +16,7 @@ export default function Home() {
   const playlist = usePlaylistStore((s) => s.playlist);
   const loading = usePlaylistStore((s) => s.loadingPlaylist);
   const error = usePlaylistStore((s) => s.playlistError);
+  const progress = usePlaylistStore((s) => s.loadingProgress);
   const m3uUrl = usePlaylistStore((s) => s.m3uUrl);
   const favorites = usePlaylistStore((s) => s.favorites);
   const history = usePlaylistStore((s) => s.watchHistory);
@@ -116,6 +117,12 @@ export default function Home() {
           <SkeletonRail />
           <SkeletonRail />
         </div>
+        {progress ? (
+          <div className="fixed bottom-6 left-1/2 -translate-x-1/2 z-30 bg-card border border-border rounded-full px-5 py-3 shadow-2xl flex items-center gap-3 text-sm">
+            <div className="h-4 w-4 border-2 border-border border-t-[var(--accent)] rounded-full animate-spin" />
+            <span className="font-mono">{progress}</span>
+          </div>
+        ) : null}
       </div>
     );
   }

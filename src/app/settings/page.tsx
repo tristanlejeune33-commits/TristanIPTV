@@ -18,6 +18,7 @@ export default function SettingsPage() {
   const history = usePlaylistStore((s) => s.watchHistory);
   const proxyStreams = usePlaylistStore((s) => s.proxyStreams);
   const setProxyStreams = usePlaylistStore((s) => s.setProxyStreams);
+  const progress = usePlaylistStore((s) => s.loadingProgress);
 
   const [input, setInput] = useState(currentUrl ?? "");
 
@@ -94,6 +95,13 @@ export default function SettingsPage() {
               </button>
             ) : null}
           </div>
+
+          {loading && progress ? (
+            <div className="mt-2 p-4 rounded-md bg-card border border-border text-sm flex items-center gap-3">
+              <div className="h-4 w-4 border-2 border-border border-t-[var(--accent)] rounded-full animate-spin" />
+              <span className="font-mono text-muted">{progress}</span>
+            </div>
+          ) : null}
 
           {playlist && !loading && !error ? (
             <div className="mt-2 p-4 rounded-md bg-emerald-500/5 border border-emerald-500/20 text-sm space-y-1">

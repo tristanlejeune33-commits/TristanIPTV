@@ -27,6 +27,10 @@ type PlaylistState = {
   loadingPlaylist: boolean;
   setLoadingPlaylist: (v: boolean) => void;
 
+  /** Human-readable progress while the playlist is being fetched/parsed. */
+  loadingProgress: string | null;
+  setLoadingProgress: (msg: string | null) => void;
+
   playlistError: string | null;
   setPlaylistError: (msg: string | null) => void;
 
@@ -56,6 +60,9 @@ export const usePlaylistStore = create<PlaylistState>()(
 
       loadingPlaylist: false,
       setLoadingPlaylist: (v) => set({ loadingPlaylist: v }),
+
+      loadingProgress: null,
+      setLoadingProgress: (msg) => set({ loadingProgress: msg }),
 
       playlistError: null,
       setPlaylistError: (msg) => set({ playlistError: msg }),
