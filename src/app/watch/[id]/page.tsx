@@ -8,6 +8,7 @@ import { toast } from "sonner";
 import { Player } from "@/components/player";
 import { usePlaylistStore } from "@/lib/store";
 import { EmptyState } from "@/components/empty-state";
+import { proxiedStreamUrl } from "@/lib/stream";
 
 function formatTime(seconds: number): string {
   if (!Number.isFinite(seconds) || seconds < 0) return "0:00";
@@ -34,6 +35,7 @@ export default function WatchPage({
   const toggleFav = usePlaylistStore((s) => s.toggleFavorite);
   const markWatched = usePlaylistStore((s) => s.markWatched);
   const history = usePlaylistStore((s) => s.watchHistory);
+  const proxyStreams = usePlaylistStore((s) => s.proxyStreams);
 
   const channel = useMemo(
     () => playlist?.channels.find((c) => c.id === id),
@@ -332,8 +334,8 @@ export default function WatchPage({
         {/* Render player as soon as we know we don't need to prompt, or once a choice was made */}
         {!needsResumePrompt || resumeChoice !== null ? (
           <Player
-            key={`${channel.id}-${resumeChoice ?? "auto"}`}
-            src={channel.url}
+            key={`${channel.id}-${resumeChoice ?? "auto"}-${proxyStreams ? "p" : "d"}`}
+            src={proxyStreams ? proxiedStreamUrl(channel.url) : channel.url}
             poster={channel.logo}
             startTime={resumeChoice === "resume" ? savedPosition : undefined}
             isVod={isVod}

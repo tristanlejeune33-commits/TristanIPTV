@@ -16,6 +16,10 @@ type PlaylistState = {
   m3uUrl: string | null;
   setM3uUrl: (url: string | null) => void;
 
+  /** Route every stream through /api/hls to bypass CORS / UA blocks. Default: true. */
+  proxyStreams: boolean;
+  setProxyStreams: (v: boolean) => void;
+
   // Loaded playlist (not persisted — re-fetched on app load)
   playlist: ParsedPlaylist | null;
   setPlaylist: (p: ParsedPlaylist | null) => void;
@@ -43,6 +47,9 @@ export const usePlaylistStore = create<PlaylistState>()(
     (set, get) => ({
       m3uUrl: null,
       setM3uUrl: (url) => set({ m3uUrl: url }),
+
+      proxyStreams: true,
+      setProxyStreams: (v) => set({ proxyStreams: v }),
 
       playlist: null,
       setPlaylist: (p) => set({ playlist: p }),
@@ -87,6 +94,7 @@ export const usePlaylistStore = create<PlaylistState>()(
       name: "netflix-iptv-store",
       partialize: (s) => ({
         m3uUrl: s.m3uUrl,
+        proxyStreams: s.proxyStreams,
         favorites: s.favorites,
         watchHistory: s.watchHistory,
       }),

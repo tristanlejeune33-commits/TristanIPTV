@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
-import { Loader2, Save, Trash2, ExternalLink } from "lucide-react";
+import { Loader2, Save, Trash2, ExternalLink, Shield } from "lucide-react";
 import { toast } from "sonner";
 import { usePlaylistStore } from "@/lib/store";
 
@@ -16,6 +16,8 @@ export default function SettingsPage() {
   const clearHistory = usePlaylistStore((s) => s.clearHistory);
   const favorites = usePlaylistStore((s) => s.favorites);
   const history = usePlaylistStore((s) => s.watchHistory);
+  const proxyStreams = usePlaylistStore((s) => s.proxyStreams);
+  const setProxyStreams = usePlaylistStore((s) => s.setProxyStreams);
 
   const [input, setInput] = useState(currentUrl ?? "");
 
@@ -115,6 +117,45 @@ export default function SettingsPage() {
             </div>
           ) : null}
         </div>
+      </section>
+
+      <section className="bg-card border border-border rounded-2xl p-6 md:p-8 mb-8">
+        <h2 className="text-lg font-semibold mb-2 flex items-center gap-2">
+          <Shield size={18} /> Lecture des chaînes
+        </h2>
+        <p className="text-sm text-muted mb-4">
+          Beaucoup de fournisseurs IPTV bloquent les requêtes directes du
+          navigateur (CORS, User-Agent filtré). Le proxy fait passer le flux
+          par notre serveur local — c&apos;est ce qui permet aux flux qui
+          tournaient en boucle de démarrer.
+        </p>
+
+        <label className="flex items-start gap-3 p-4 rounded-lg border border-border bg-background cursor-pointer hover:bg-card-hover transition-colors">
+          <input
+            type="checkbox"
+            checked={proxyStreams}
+            onChange={(e) => {
+              setProxyStreams(e.target.checked);
+              toast(
+                e.target.checked
+                  ? "Proxy stream activé"
+                  : "Proxy stream désactivé"
+              );
+            }}
+            className="mt-1 h-4 w-4 accent-[var(--accent)]"
+          />
+          <div className="flex-1">
+            <p className="text-sm font-semibold">
+              Faire passer les flux par le proxy{" "}
+              <span className="text-[var(--accent)] text-xs">(recommandé)</span>
+            </p>
+            <p className="text-xs text-muted mt-1">
+              Active si une chaîne charge en boucle sans démarrer. Désactive
+              uniquement si tu sais que ton fournisseur autorise le navigateur
+              directement (rare).
+            </p>
+          </div>
+        </label>
       </section>
 
       <section className="bg-card border border-border rounded-2xl p-6 md:p-8 mb-8">
