@@ -3,7 +3,7 @@
 import { use, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { ArrowLeft, Heart, SkipBack, SkipForward, RotateCw, Play } from "lucide-react";
+import { Heart, SkipBack, SkipForward, RotateCw, Play, Home as HomeIcon, X } from "lucide-react";
 import { toast } from "sonner";
 import { Player } from "@/components/player";
 import { usePlaylistStore } from "@/lib/store";
@@ -18,6 +18,8 @@ function formatTime(seconds: number): string {
   if (h > 0) return `${h}:${String(m).padStart(2, "0")}:${String(s).padStart(2, "0")}`;
   return `${m}:${String(s).padStart(2, "0")}`;
 }
+
+const AUTOPLAY_COUNTDOWN_SECONDS = 7;
 
 export default function WatchPage({
   params,
@@ -49,8 +51,7 @@ export default function WatchPage({
   );
   const savedPosition = savedEntry?.position;
 
-  // Resume overlay state — reset on channel change via the render-time "reset
-  // state when input changed" pattern instead of an effect.
+  // Resume overlay — reset on id change via render-time pattern
   const [resumeChoice, setResumeChoice] = useState<"resume" | "restart" | null>(null);
   const [resumeForId, setResumeForId] = useState<string | null>(null);
   if (resumeForId !== id) {
@@ -58,12 +59,10 @@ export default function WatchPage({
     setResumeChoice(null);
   }
 
-  const needsResumePrompt = Boolean(
-    isVod && savedPosition && savedPosition > 30
-  );
+  const needsResumePrompt = Boolean(isVod && savedPosition && savedPosition > 30);
   const showResumeOverlay = needsResumePrompt && resumeChoice === null;
 
-  // Neighbouring channels: prev/next within the same group
+  // Group neighbours (live)
   const { prevChannel, nextChannel, position, totalInGroup } = useMemo(() => {
     if (!channel || !playlist) {
       return { prevChannel: null, nextChannel: null, position: 0, totalInGroup: 0 };
@@ -78,7 +77,7 @@ export default function WatchPage({
     };
   }, [channel, playlist]);
 
-  // For series episodes, prefer prev/next within the show
+  // For series, prev/next is across the show's episodes
   const { prevEpisode, nextEpisode } = useMemo(() => {
     if (!channel || !playlist || channel.type !== "series" || !channel.seriesInfo) {
       return { prevEpisode: null, nextEpisode: null };
@@ -92,13 +91,12 @@ export default function WatchPage({
     };
   }, [channel, playlist]);
 
-  // Mark as watched on first visit to a channel
+  // Mark as watched on first visit
   const markedRef = useRef<string | null>(null);
   useEffect(() => {
     if (!channel) return;
     if (markedRef.current === channel.id) return;
     markedRef.current = channel.id;
-    // Don't clobber saved position when just opening the page
     markWatched(channel.id, savedPosition);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [channel]);
@@ -110,7 +108,6 @@ export default function WatchPage({
     const now = Date.now();
     if (now - lastSaveRef.current < 5000) return;
     lastSaveRef.current = now;
-    // Only persist position for VOD with known duration
     if (isVod && Number.isFinite(duration) && duration > 0) {
       markWatched(channel.id, seconds);
     } else {
@@ -128,7 +125,42 @@ export default function WatchPage({
     if (target) router.push(`/watch/${encodeURIComponent(target.id)}`);
   }, [nextEpisode, nextChannel, router]);
 
-  // Keyboard shortcuts: prev/next/favorite
+  // --- Autoplay next episode for series ---
+  const [autoplayActive, setAutoplayActive] = useState(false);
+  const [autoplaySeconds, setAutoplaySeconds] = useState(AUTOPLAY_COUNTDOWN_SECONDS);
+
+  // Reset autoplay state when channel changes (render-time pattern)
+  const [autoplayForId, setAutoplayForId] = useState<string | null>(null);
+  if (autoplayForId !== id) {
+    setAutoplayForId(id);
+    setAutoplayActive(false);
+    setAutoplaySeconds(AUTOPLAY_COUNTDOWN_SECONDS);
+  }
+
+  function startAutoplayCountdown() {
+    if (!nextEpisode) return;
+    setAutoplaySeconds(AUTOPLAY_COUNTDOWN_SECONDS);
+    setAutoplayActive(true);
+  }
+
+  useEffect(() => {
+    if (!autoplayActive || !nextEpisode) return;
+    if (autoplaySeconds <= 0) {
+      router.push(`/watch/${encodeURIComponent(nextEpisode.id)}`);
+      return;
+    }
+    const id = window.setTimeout(() => setAutoplaySeconds((s) => s - 1), 1000);
+    return () => window.clearTimeout(id);
+  }, [autoplayActive, autoplaySeconds, nextEpisode, router]);
+
+  function onPlayerEnded() {
+    // Auto-advance only inside a series and if there's a next episode
+    if (channel?.type === "series" && nextEpisode) {
+      startAutoplayCountdown();
+    }
+  }
+
+  // Keyboard shortcuts
   useEffect(() => {
     function onKey(e: KeyboardEvent) {
       const target = e.target as HTMLElement | null;
@@ -141,6 +173,7 @@ export default function WatchPage({
         e.preventDefault();
         goPrev();
       } else if (e.key.toLowerCase() === "l" && channel) {
+        // Only when not typing — already filtered above. Toggle favorite.
         e.preventDefault();
         toggleFav(channel.id);
         toast(isFav ? "Retiré des favoris" : "Ajouté aux favoris", {
@@ -192,113 +225,81 @@ export default function WatchPage({
   }
 
   const showsSeriesNav = channel.type === "series" && channel.seriesInfo;
-  const navTotal = showsSeriesNav
+  const totalEpisodes = showsSeriesNav
     ? playlist.shows[channel.seriesInfo!.showSlug]?.episodes.length ?? totalInGroup
     : totalInGroup;
-  const navPos = showsSeriesNav
+  const episodeNumber = showsSeriesNav
     ? (playlist.shows[channel.seriesInfo!.showSlug]?.episodes.findIndex(
         (e) => e.id === channel.id
       ) ?? -1) + 1
     : position;
 
+  const seasonLabel = channel.seriesInfo?.season
+    ? `S${String(channel.seriesInfo.season).padStart(2, "0")}`
+    : "";
+  const epLabel = channel.seriesInfo?.episode
+    ? `E${String(channel.seriesInfo.episode).padStart(2, "0")}`
+    : "";
+
+  const playerTitle = channel.name;
+  const playerSubtitle = showsSeriesNav
+    ? `${channel.seriesInfo!.show} · ${seasonLabel}${epLabel} · ${channel.group}`
+    : `${channel.group}${totalEpisodes > 0 ? ` · ${episodeNumber}/${totalEpisodes}` : ""}${
+        channel.isFrench ? " · 🇫🇷" : ""
+      }`;
+
+  const topActions = (
+    <div className="flex items-center gap-2">
+      <button
+        type="button"
+        onClick={goPrev}
+        disabled={!prevChannel && !prevEpisode}
+        aria-label={showsSeriesNav ? "Épisode précédent" : "Chaîne précédente"}
+        className="h-10 w-10 grid place-items-center rounded-full bg-black/50 hover:bg-black/70 border border-white/15 text-white transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+        title="Précédent (←)"
+      >
+        <SkipBack size={16} />
+      </button>
+      <button
+        type="button"
+        onClick={goNext}
+        disabled={!nextChannel && !nextEpisode}
+        aria-label={showsSeriesNav ? "Épisode suivant" : "Chaîne suivante"}
+        className="h-10 w-10 grid place-items-center rounded-full bg-black/50 hover:bg-black/70 border border-white/15 text-white transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+        title="Suivant (→)"
+      >
+        <SkipForward size={16} />
+      </button>
+      <button
+        type="button"
+        onClick={onFavClick}
+        aria-label={isFav ? "Retirer des favoris" : "Ajouter aux favoris"}
+        title="Favori (L)"
+        className={`h-10 w-10 grid place-items-center rounded-full border transition-colors ${
+          isFav
+            ? "border-[var(--accent)] bg-[var(--accent)]/20 text-[var(--accent)]"
+            : "border-white/15 bg-black/50 hover:bg-black/70 text-white"
+        }`}
+      >
+        <Heart size={16} fill={isFav ? "currentColor" : "none"} />
+      </button>
+      <Link
+        href="/"
+        aria-label="Accueil"
+        title="Accueil"
+        className="h-10 w-10 grid place-items-center rounded-full bg-black/50 hover:bg-black/70 border border-white/15 text-white transition-colors"
+      >
+        <HomeIcon size={16} />
+      </Link>
+    </div>
+  );
+
   return (
-    <div className="fixed inset-0 bg-black flex flex-col">
-      {/* Top bar */}
-      <div className="absolute top-0 inset-x-0 z-30 p-4 md:p-6 flex items-center gap-3 bg-gradient-to-b from-black/80 to-transparent">
-        <button
-          type="button"
-          onClick={() => router.back()}
-          className="h-10 w-10 grid place-items-center rounded-full bg-black/60 hover:bg-card-hover border border-border transition-colors"
-          aria-label="Retour"
-        >
-          <ArrowLeft size={16} />
-        </button>
-
-        <div className="flex items-center gap-3 min-w-0 max-w-md">
-          {channel.logo ? (
-            // eslint-disable-next-line @next/next/no-img-element
-            <img
-              src={channel.logo}
-              alt=""
-              referrerPolicy="no-referrer"
-              className="h-9 w-9 rounded-md object-contain bg-card p-1"
-              onError={(e) => {
-                (e.currentTarget as HTMLImageElement).style.display = "none";
-              }}
-            />
-          ) : null}
-          <div className="min-w-0">
-            <p className="text-sm font-semibold truncate">
-              {channel.name}
-              {channel.isFrench ? (
-                <span className="ml-2 text-[10px] text-[var(--accent)] font-mono">FR</span>
-              ) : null}
-            </p>
-            <p className="text-xs text-muted truncate">
-              {showsSeriesNav ? (
-                <Link
-                  href={`/series/${encodeURIComponent(channel.seriesInfo!.showSlug)}`}
-                  className="hover:text-foreground transition-colors"
-                >
-                  Série · {channel.seriesInfo!.show}
-                </Link>
-              ) : (
-                channel.group
-              )}
-              {navTotal > 0 ? ` · ${navPos}/${navTotal}` : ""}
-            </p>
-          </div>
-        </div>
-
-        <div className="ml-auto flex items-center gap-2">
-          <button
-            type="button"
-            onClick={goPrev}
-            disabled={!prevChannel && !prevEpisode}
-            aria-label={showsSeriesNav ? "Épisode précédent" : "Chaîne précédente"}
-            className="h-10 w-10 grid place-items-center rounded-full border border-border bg-black/60 hover:bg-card-hover transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
-            title={showsSeriesNav ? "Épisode précédent (←)" : "Précédente (←)"}
-          >
-            <SkipBack size={16} />
-          </button>
-          <button
-            type="button"
-            onClick={goNext}
-            disabled={!nextChannel && !nextEpisode}
-            aria-label={showsSeriesNav ? "Épisode suivant" : "Chaîne suivante"}
-            className="h-10 w-10 grid place-items-center rounded-full border border-border bg-black/60 hover:bg-card-hover transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
-            title={showsSeriesNav ? "Épisode suivant (→)" : "Suivante (→)"}
-          >
-            <SkipForward size={16} />
-          </button>
-
-          <button
-            type="button"
-            onClick={onFavClick}
-            aria-label={isFav ? "Retirer des favoris" : "Ajouter aux favoris"}
-            className={`h-10 w-10 grid place-items-center rounded-full border transition-colors ${
-              isFav
-                ? "border-[var(--accent)] bg-[var(--accent)]/20 text-[var(--accent)]"
-                : "border-border bg-black/60 hover:bg-card-hover"
-            }`}
-            title="Favori (L)"
-          >
-            <Heart size={16} fill={isFav ? "currentColor" : "none"} />
-          </button>
-
-          <Link
-            href="/"
-            className="h-10 px-4 grid place-items-center rounded-full border border-border bg-black/60 hover:bg-card-hover transition-colors text-sm"
-          >
-            Accueil
-          </Link>
-        </div>
-      </div>
-
-      <div className="flex-1">
-        {/* Resume overlay covers the player until user chooses */}
+    <div className="fixed inset-0 bg-black">
+      <div className="absolute inset-0">
+        {/* Resume overlay */}
         {showResumeOverlay && savedPosition ? (
-          <div className="absolute inset-0 z-20 grid place-items-center bg-black/85 backdrop-blur-sm">
+          <div className="absolute inset-0 z-30 grid place-items-center bg-black/85 backdrop-blur-sm">
             <div className="max-w-md w-full text-center px-6">
               <p className="text-sm text-muted uppercase tracking-widest mb-2">
                 Reprendre la lecture ?
@@ -339,8 +340,86 @@ export default function WatchPage({
             poster={channel.logo}
             startTime={resumeChoice === "resume" ? savedPosition : undefined}
             isVod={isVod}
+            title={playerTitle}
+            subtitle={playerSubtitle}
+            onBack={() => router.back()}
+            topActions={topActions}
             onTimeUpdate={onTime}
+            onEnded={onPlayerEnded}
           />
+        ) : null}
+
+        {/* Autoplay next episode overlay */}
+        {autoplayActive && nextEpisode ? (
+          <div className="absolute bottom-4 right-4 md:bottom-8 md:right-8 z-40 max-w-md w-[calc(100%-2rem)] md:w-[26rem]">
+            <div className="bg-card border border-border rounded-2xl shadow-2xl p-4 md:p-5">
+              <div className="flex items-start gap-3">
+                {nextEpisode.logo ? (
+                  // eslint-disable-next-line @next/next/no-img-element
+                  <img
+                    src={nextEpisode.logo}
+                    alt=""
+                    referrerPolicy="no-referrer"
+                    className="h-16 w-24 rounded-md object-cover bg-background shrink-0"
+                  />
+                ) : (
+                  <div className="h-16 w-24 rounded-md bg-background shrink-0" />
+                )}
+                <div className="min-w-0 flex-1">
+                  <p className="text-[10px] uppercase tracking-widest text-[var(--accent)] font-bold mb-1">
+                    Épisode suivant dans {autoplaySeconds}…
+                  </p>
+                  <p className="text-sm font-semibold truncate">{nextEpisode.name}</p>
+                  <p className="text-xs text-muted truncate">
+                    {nextEpisode.seriesInfo?.season
+                      ? `S${String(nextEpisode.seriesInfo.season).padStart(2, "0")}`
+                      : ""}
+                    {nextEpisode.seriesInfo?.episode
+                      ? ` E${String(nextEpisode.seriesInfo.episode).padStart(2, "0")}`
+                      : ""}
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setAutoplayActive(false)}
+                  aria-label="Annuler"
+                  className="h-8 w-8 grid place-items-center rounded-full hover:bg-card-hover text-muted hover:text-foreground transition-colors"
+                >
+                  <X size={14} />
+                </button>
+              </div>
+              <div className="mt-3 flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => router.push(`/watch/${encodeURIComponent(nextEpisode.id)}`)}
+                  className="flex-1 inline-flex items-center justify-center gap-2 h-10 rounded-md bg-foreground text-background font-semibold hover:bg-foreground/85 transition-colors text-sm"
+                >
+                  <Play size={14} fill="currentColor" />
+                  Lecture immédiate
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setAutoplayActive(false)}
+                  className="h-10 px-4 rounded-md border border-border text-muted hover:text-foreground hover:bg-card-hover transition-colors text-sm"
+                >
+                  Annuler
+                </button>
+              </div>
+              {/* Progress bar of the countdown */}
+              <div className="mt-3 h-1 rounded-full bg-border overflow-hidden">
+                <div
+                  className="h-full bg-[var(--accent)] transition-[width] duration-1000 linear"
+                  style={{
+                    width: `${
+                      ((AUTOPLAY_COUNTDOWN_SECONDS - autoplaySeconds) /
+                        AUTOPLAY_COUNTDOWN_SECONDS) *
+                      100
+                    }%`,
+                  }}
+                />
+              </div>
+            </div>
+          </div>
         ) : null}
       </div>
     </div>

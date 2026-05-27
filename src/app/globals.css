@@ -58,3 +58,24 @@ body {
 .controls-fade {
   transition: opacity 250ms ease-out;
 }
+
+/* Seek skip flash animation */
+@keyframes seekFlashFade {
+  0% { opacity: 1; transform: scale(0.9); }
+  30% { opacity: 1; transform: scale(1); }
+  100% { opacity: 0; transform: scale(1.05); }
+}
+.seek-flash {
+  animation: seekFlashFade 500ms ease-out forwards;
+}
+
+/* Player subtitle styling: bigger, with readable background */
+video::cue {
+  font-size: 1.05em;
+  background: rgba(0, 0, 0, 0.75);
+  color: white;
+  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.9);
+  line-height: 1.3;
+  padding: 0.1em 0.4em;
+  border-radius: 4px;
+}

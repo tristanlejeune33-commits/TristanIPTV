@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Hls, {
   type ErrorData,
   type Level,
@@ -21,7 +21,20 @@ import {
   Languages,
   Gauge,
   Check,
+  Rewind,
+  FastForward,
+  Upload,
+  Keyboard,
+  X,
+  ArrowLeft,
 } from "lucide-react";
+import { toVttBlobUrl } from "@/lib/subtitles";
+
+type ExternalSub = {
+  id: string;
+  label: string;
+  blobUrl: string;
+};
 
 type Props = {
   src: string;
@@ -30,11 +43,22 @@ type Props = {
   startTime?: number;
   /** Hint that this is a VOD source (movie/episode) — enables seek bar, speed, etc. */
   isVod?: boolean;
+  /** Title shown in the always-visible top bar (especially useful in fullscreen). */
+  title?: string;
+  /** Subtitle / context shown under the title in the top bar. */
+  subtitle?: string;
+  /** Optional back action — when provided, a back arrow appears in the top bar. */
+  onBack?: () => void;
+  /** Extra buttons rendered on the right side of the top bar (prev/next, favorite, etc.). */
+  topActions?: React.ReactNode;
   onError?: (msg: string) => void;
   onTimeUpdate?: (seconds: number, duration: number) => void;
+  /** Fires when playback reaches the end (used by the watch page for autoplay next). */
+  onEnded?: () => void;
 };
 
 const PLAYBACK_RATES = [0.5, 0.75, 1, 1.25, 1.5, 1.75, 2] as const;
+const SKIP_SECONDS = 15;
 
 type Panel = "none" | "quality" | "audio" | "subtitles" | "speed";
 
@@ -52,8 +76,13 @@ export function Player({
   poster,
   startTime,
   isVod,
+  title,
+  subtitle,
+  onBack,
+  topActions,
   onError,
   onTimeUpdate,
+  onEnded,
 }: Props) {
   const wrapperRef = useRef<HTMLDivElement>(null);
   const videoRef = useRef<HTMLVideoElement>(null);
@@ -78,11 +107,21 @@ export function Player({
   const [subtitleTrack, setSubtitleTrack] = useState(-1);
   const [playbackRate, setPlaybackRate] = useState(1);
 
+  // External subtitles (uploaded by user)
+  const [externalSubs, setExternalSubs] = useState<ExternalSub[]>([]);
+  const [activeExternalId, setActiveExternalId] = useState<string | null>(null);
+
   // Playback time
   const [currentTime, setCurrentTime] = useState(0);
   const [duration, setDuration] = useState(0);
 
   const [panel, setPanel] = useState<Panel>("none");
+  const [controlsVisible, setControlsVisible] = useState(true);
+  const controlsTimerRef = useRef<number | null>(null);
+  const [seekFlash, setSeekFlash] = useState<{ side: "left" | "right"; nonce: number } | null>(null);
+  const [showShortcuts, setShowShortcuts] = useState(false);
+
+  const subUploadRef = useRef<HTMLInputElement>(null);
 
   // Seek to startTime once the video is ready
   function trySeek() {
@@ -118,15 +157,13 @@ export function Player({
     }
 
     if (Hls.isSupported()) {
-      // Fast-start tuning: small initial buffer, allow quick start at lowest level,
-      // then ABR ramps up. Lower latency and faster perceived startup.
       const hls = new Hls({
         enableWorker: true,
         lowLatencyMode: true,
         backBufferLength: 30,
         maxBufferLength: 20,
         maxMaxBufferLength: 60,
-        startLevel: -1, // let ABR pick — but the first fragment loads immediately
+        startLevel: -1,
         manifestLoadingMaxRetry: 2,
         levelLoadingMaxRetry: 2,
         fragLoadingMaxRetry: 4,
@@ -221,6 +258,7 @@ export function Player({
       trySeek();
     };
     const onRate = () => setPlaybackRate(video.playbackRate);
+    const onEnd = () => onEnded?.();
 
     video.addEventListener("play", onPlay);
     video.addEventListener("pause", onPause);
@@ -234,6 +272,7 @@ export function Player({
     video.addEventListener("leavepictureinpicture", onLeavePip);
     video.addEventListener("loadedmetadata", onLoadedMeta);
     video.addEventListener("ratechange", onRate);
+    video.addEventListener("ended", onEnd);
 
     return () => {
       video.removeEventListener("play", onPlay);
@@ -248,9 +287,10 @@ export function Player({
       video.removeEventListener("leavepictureinpicture", onLeavePip);
       video.removeEventListener("loadedmetadata", onLoadedMeta);
       video.removeEventListener("ratechange", onRate);
+      video.removeEventListener("ended", onEnd);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [onTimeUpdate, startTime]);
+  }, [onTimeUpdate, onEnded, startTime]);
 
   // Fullscreen state sync
   useEffect(() => {
@@ -258,6 +298,27 @@ export function Player({
     document.addEventListener("fullscreenchange", onFs);
     return () => document.removeEventListener("fullscreenchange", onFs);
   }, []);
+
+  // Auto-hide controls after inactivity (only while playing)
+  function showControls() {
+    setControlsVisible(true);
+    if (controlsTimerRef.current) window.clearTimeout(controlsTimerRef.current);
+    controlsTimerRef.current = window.setTimeout(() => {
+      if (playing && panel === "none") setControlsVisible(false);
+    }, 3000);
+  }
+  useEffect(() => {
+    return () => {
+      if (controlsTimerRef.current) window.clearTimeout(controlsTimerRef.current);
+    };
+  }, []);
+  // Keep controls visible whenever the video is paused (no effect needed — derive
+  // visibility in render via the `playing` state directly when reading it).
+  const [lastPlaying, setLastPlaying] = useState(playing);
+  if (lastPlaying !== playing) {
+    setLastPlaying(playing);
+    if (!playing) setControlsVisible(true);
+  }
 
   const togglePlay = useCallback(() => {
     const v = videoRef.current;
@@ -310,6 +371,20 @@ export function Player({
     v.currentTime = Math.max(0, Math.min(v.duration, seconds));
   }
 
+  function skip(deltaSeconds: number) {
+    const v = videoRef.current;
+    if (!v) return;
+    seek(v.currentTime + deltaSeconds);
+    setSeekFlash({ side: deltaSeconds < 0 ? "left" : "right", nonce: Date.now() });
+  }
+
+  // Auto-hide the seek flash
+  useEffect(() => {
+    if (!seekFlash) return;
+    const id = window.setTimeout(() => setSeekFlash(null), 500);
+    return () => window.clearTimeout(id);
+  }, [seekFlash]);
+
   function pickLevel(idx: number) {
     if (!hlsRef.current) return;
     hlsRef.current.currentLevel = idx;
@@ -326,11 +401,43 @@ export function Player({
 
   function pickSubtitle(idx: number) {
     const hls = hlsRef.current;
-    if (!hls) return;
-    hls.subtitleTrack = idx;
-    hls.subtitleDisplay = idx >= 0;
-    setSubtitleTrack(idx);
+    if (hls) {
+      hls.subtitleTrack = idx;
+      hls.subtitleDisplay = idx >= 0;
+      setSubtitleTrack(idx);
+    }
+    // Disable any external subtitle while a HLS one is selected
+    if (idx >= 0) {
+      setActiveExternalId(null);
+      setVideoTextTracks(null);
+    }
     setPanel("none");
+  }
+
+  function pickExternalSubtitle(id: string | null) {
+    setActiveExternalId(id);
+    // Disable HLS subtitle if external is on
+    const hls = hlsRef.current;
+    if (hls && id !== null) {
+      hls.subtitleTrack = -1;
+      hls.subtitleDisplay = false;
+      setSubtitleTrack(-1);
+    }
+    setVideoTextTracks(id);
+    setPanel("none");
+  }
+
+  // Manage native video.textTracks for our externally-injected <track>s
+  function setVideoTextTracks(activeId: string | null) {
+    const v = videoRef.current;
+    if (!v) return;
+    const tracks = v.textTracks;
+    for (let i = 0; i < tracks.length; i++) {
+      const t = tracks[i];
+      // Our custom tracks carry their id in `id`; HLS-injected ones get a different label
+      if (!t.id) continue;
+      t.mode = t.id === activeId ? "showing" : "disabled";
+    }
   }
 
   function pickRate(rate: number) {
@@ -339,6 +446,24 @@ export function Player({
     v.playbackRate = rate;
     setPlaybackRate(rate);
     setPanel("none");
+  }
+
+  async function onSubtitleFile(file: File) {
+    try {
+      const text = await file.text();
+      const blobUrl = toVttBlobUrl(text);
+      if (!blobUrl) {
+        onError?.("Format de sous-titre non reconnu (utilise .srt ou .vtt)");
+        return;
+      }
+      const id = `ext-${Date.now()}`;
+      const entry: ExternalSub = { id, label: file.name.replace(/\.(srt|vtt)$/i, ""), blobUrl };
+      setExternalSubs((arr) => [...arr, entry]);
+      // Activate the new track on next paint (after the <track> element exists)
+      requestAnimationFrame(() => pickExternalSubtitle(id));
+    } catch (e) {
+      onError?.(e instanceof Error ? e.message : "Erreur de lecture du fichier");
+    }
   }
 
   // Keyboard shortcuts
@@ -376,33 +501,45 @@ export function Player({
         case "j":
           if (isVod) {
             e.preventDefault();
-            seek((videoRef.current?.currentTime ?? 0) - 10);
+            skip(-SKIP_SECONDS);
           }
           break;
         case "l":
-          // L is reserved for favorite in the parent watch page — skip when VOD
-          // seek is the only handler intended in the player itself.
+          // L is reserved by the parent watch page for favorite — handled there.
           break;
         case "c":
-          // toggle subtitles off/on (cycle through tracks)
-          if (subtitleTracks.length > 0) {
+          if (subtitleTracks.length > 0 || externalSubs.length > 0) {
             e.preventDefault();
-            const next =
-              subtitleTrack === -1
-                ? 0
-                : subtitleTrack + 1 >= subtitleTracks.length
-                  ? -1
-                  : subtitleTrack + 1;
-            pickSubtitle(next);
+            // Cycle: off -> first external -> first HLS -> ... -> off
+            if (activeExternalId !== null) {
+              const i = externalSubs.findIndex((s) => s.id === activeExternalId);
+              if (i + 1 < externalSubs.length) pickExternalSubtitle(externalSubs[i + 1].id);
+              else if (subtitleTracks.length > 0) pickSubtitle(0);
+              else pickExternalSubtitle(null);
+            } else if (subtitleTrack === -1) {
+              if (externalSubs.length > 0) pickExternalSubtitle(externalSubs[0].id);
+              else pickSubtitle(0);
+            } else {
+              const next =
+                subtitleTrack + 1 >= subtitleTracks.length ? -1 : subtitleTrack + 1;
+              pickSubtitle(next);
+            }
           }
+          break;
+        case "?":
+        case "h":
+          e.preventDefault();
+          setShowShortcuts((v) => !v);
           break;
         default:
           break;
       }
+      showControls();
     }
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [togglePlay, toggleMute, toggleFullscreen, togglePip, isVod, subtitleTracks, subtitleTrack]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [togglePlay, toggleMute, toggleFullscreen, togglePip, isVod, subtitleTracks, subtitleTrack, externalSubs, activeExternalId]);
 
   // Click-on-progress-bar to seek
   function onProgressClick(e: React.MouseEvent<HTMLDivElement>) {
@@ -413,21 +550,104 @@ export function Player({
     seek(pct * duration);
   }
 
+  // Mobile double-tap zones (left = -10s, right = +10s)
+  const lastTapRef = useRef<{ side: "left" | "right" | "center"; t: number } | null>(null);
+  function onTapZone(side: "left" | "right") {
+    if (!isVod) return;
+    const now = Date.now();
+    const prev = lastTapRef.current;
+    if (prev && prev.side === side && now - prev.t < 350) {
+      skip(side === "left" ? -10 : 10);
+      lastTapRef.current = null;
+      return;
+    }
+    lastTapRef.current = { side, t: now };
+    // Single tap behaves like a click on video — toggle controls / play
+    showControls();
+  }
+
+  // Subtitle progress bar position relative to resume mark (visual cue) — skip for now
   const hasMultiAudio = audioTracks.length > 1;
-  const hasSubs = subtitleTracks.length > 0;
+  const totalSubs = subtitleTracks.length + externalSubs.length;
+  const hasSubs = totalSubs > 0 || isVod; // VOD allows upload even if no built-in
   const hasMultiQuality = levels.length > 1;
 
+  // Build a list of HLS audio tracks with display labels — memoized
+  const audioLabels = useMemo(
+    () => audioTracks.map((t, idx) => ({ idx, label: labelForTrack(t) })),
+    [audioTracks]
+  );
+
   return (
-    <div ref={wrapperRef} className="relative w-full h-full bg-black group/player">
+    <div
+      ref={wrapperRef}
+      className="relative w-full h-full bg-black group/player"
+      onMouseMove={showControls}
+      onMouseLeave={() => playing && panel === "none" && setControlsVisible(false)}
+    >
       <video
         ref={videoRef}
         poster={poster}
         playsInline
         controls={false}
-        className="w-full h-full object-contain bg-black"
+        className="absolute inset-0 w-full h-full object-contain bg-black"
         onClick={togglePlay}
+      >
+        {externalSubs.map((s) => (
+          <track
+            key={s.id}
+            id={s.id}
+            kind="subtitles"
+            label={s.label}
+            srcLang="fr"
+            src={s.blobUrl}
+            default={activeExternalId === s.id}
+          />
+        ))}
+      </video>
+
+      {/* Mobile tap zones */}
+      <div className="absolute inset-y-0 left-0 w-1/3 md:hidden" onClick={() => onTapZone("left")} />
+      <div className="absolute inset-y-0 right-0 w-1/3 md:hidden" onClick={() => onTapZone("right")} />
+
+      {/* Hidden subtitle file input */}
+      <input
+        ref={subUploadRef}
+        type="file"
+        accept=".srt,.vtt,text/vtt,text/srt,application/x-subrip"
+        className="hidden"
+        onChange={(e) => {
+          const f = e.target.files?.[0];
+          if (f) onSubtitleFile(f);
+          if (e.target) e.target.value = "";
+        }}
       />
 
+      {/* Seek flash (visual feedback for ±15s and double-tap) */}
+      {seekFlash ? (
+        <div
+          key={seekFlash.nonce}
+          className={`pointer-events-none absolute top-1/2 -translate-y-1/2 ${
+            seekFlash.side === "left" ? "left-[20%]" : "right-[20%]"
+          } seek-flash`}
+        >
+          <div className="bg-black/70 backdrop-blur rounded-full px-4 py-2 text-white text-sm font-mono flex items-center gap-2">
+            {seekFlash.side === "left" ? (
+              <>
+                <Rewind size={16} />
+                -{SKIP_SECONDS}s
+              </>
+            ) : (
+              <>
+                +{SKIP_SECONDS}s
+                <FastForward size={16} />
+              </>
+            )}
+          </div>
+        </div>
+      ) : null}
+
+      {/* Buffering spinner */}
       {buffering && !errorMsg ? (
         <div className="pointer-events-none absolute inset-0 grid place-items-center">
           <div className="flex flex-col items-center gap-3 bg-black/40 backdrop-blur-sm px-6 py-4 rounded-2xl">
@@ -459,8 +679,110 @@ export function Player({
         </div>
       ) : null}
 
-      {/* Controls overlay */}
-      <div className="controls-fade absolute inset-x-0 bottom-0 p-4 md:p-6 bg-gradient-to-t from-black/95 via-black/60 to-transparent opacity-0 group-hover/player:opacity-100 focus-within:opacity-100">
+      {/* Top info bar — always visible when controls show, critical in fullscreen */}
+      <div
+        className={`absolute inset-x-0 top-0 z-20 transition-opacity duration-300 ${
+          controlsVisible || !playing || panel !== "none"
+            ? "opacity-100"
+            : "opacity-0 pointer-events-none"
+        }`}
+      >
+        <div className="bg-gradient-to-b from-black/85 via-black/40 to-transparent px-4 md:px-8 pt-3 pb-10 flex items-start gap-3">
+          {onBack ? (
+            <button
+              type="button"
+              onClick={onBack}
+              aria-label="Retour"
+              className="shrink-0 h-10 w-10 grid place-items-center rounded-full bg-black/50 hover:bg-card-hover border border-white/15 text-white transition-colors"
+            >
+              <ArrowLeft size={18} />
+            </button>
+          ) : null}
+          <div className="min-w-0 flex-1">
+            {title ? (
+              <h1 className="text-base md:text-xl font-bold text-white truncate drop-shadow">
+                {title}
+              </h1>
+            ) : null}
+            {subtitle ? (
+              <p className="text-xs md:text-sm text-white/70 truncate">{subtitle}</p>
+            ) : null}
+          </div>
+          {topActions ? <div className="shrink-0 flex items-center gap-2">{topActions}</div> : null}
+          <button
+            type="button"
+            onClick={() => setShowShortcuts(true)}
+            aria-label="Raccourcis clavier"
+            title="Raccourcis (?)"
+            className="shrink-0 h-10 w-10 grid place-items-center rounded-full bg-black/50 hover:bg-card-hover border border-white/15 text-white transition-colors"
+          >
+            <Keyboard size={16} />
+          </button>
+        </div>
+      </div>
+
+      {/* Center primary controls — large, always-visible touch targets */}
+      <div
+        className={`absolute inset-0 z-10 grid place-items-center pointer-events-none transition-opacity duration-300 ${
+          controlsVisible || !playing || panel !== "none"
+            ? "opacity-100"
+            : "opacity-0"
+        }`}
+      >
+        <div className="flex items-center gap-6 md:gap-10 pointer-events-auto">
+          {isVod ? (
+            <button
+              type="button"
+              onClick={() => skip(-SKIP_SECONDS)}
+              aria-label={`Reculer de ${SKIP_SECONDS} secondes`}
+              title={`-${SKIP_SECONDS}s (J)`}
+              className="h-14 w-14 md:h-16 md:w-16 grid place-items-center rounded-full bg-black/40 hover:bg-black/70 backdrop-blur border border-white/20 text-white transition-all hover:scale-105 active:scale-95 relative"
+            >
+              <Rewind size={26} fill="currentColor" />
+              <span className="absolute -bottom-1 right-1.5 text-[10px] font-bold bg-black/80 rounded px-1">
+                {SKIP_SECONDS}
+              </span>
+            </button>
+          ) : null}
+
+          <button
+            type="button"
+            onClick={togglePlay}
+            aria-label={playing ? "Pause" : "Lecture"}
+            className="h-16 w-16 md:h-20 md:w-20 grid place-items-center rounded-full bg-foreground text-background hover:bg-foreground/85 transition-all hover:scale-105 active:scale-95 shadow-2xl"
+          >
+            {playing ? (
+              <Pause size={32} fill="currentColor" />
+            ) : (
+              <Play size={32} fill="currentColor" />
+            )}
+          </button>
+
+          {isVod ? (
+            <button
+              type="button"
+              onClick={() => skip(SKIP_SECONDS)}
+              aria-label={`Avancer de ${SKIP_SECONDS} secondes`}
+              title={`+${SKIP_SECONDS}s (L)`}
+              className="h-14 w-14 md:h-16 md:w-16 grid place-items-center rounded-full bg-black/40 hover:bg-black/70 backdrop-blur border border-white/20 text-white transition-all hover:scale-105 active:scale-95 relative"
+            >
+              <FastForward size={26} fill="currentColor" />
+              <span className="absolute -bottom-1 left-1.5 text-[10px] font-bold bg-black/80 rounded px-1">
+                {SKIP_SECONDS}
+              </span>
+            </button>
+          ) : null}
+        </div>
+      </div>
+
+      {/* Bottom controls overlay */}
+      <div
+        className={`absolute inset-x-0 bottom-0 z-20 px-4 md:px-6 pb-3 pt-16 bg-gradient-to-t from-black/95 via-black/60 to-transparent transition-opacity duration-300 ${
+          controlsVisible || !playing || panel !== "none"
+            ? "opacity-100"
+            : "opacity-0 pointer-events-none"
+        }`}
+      >
         {/* Seek bar (VOD only) */}
         {isVod && duration > 0 ? (
           <div className="mb-3">
@@ -471,7 +793,7 @@ export function Player({
               aria-valuemax={duration}
               aria-valuenow={currentTime}
               onClick={onProgressClick}
-              className="group/seek relative h-1.5 rounded-full bg-white/20 cursor-pointer"
+              className="group/seek relative h-1.5 hover:h-2 transition-all rounded-full bg-white/20 cursor-pointer"
             >
               <div
                 className="absolute inset-y-0 left-0 rounded-full bg-[var(--accent)] group-hover/seek:bg-[var(--accent-hover)] transition-colors"
@@ -489,21 +811,12 @@ export function Player({
           </div>
         ) : null}
 
-        <div className="flex items-center gap-3 flex-wrap">
-          <button
-            type="button"
-            onClick={togglePlay}
-            aria-label={playing ? "Pause" : "Lecture"}
-            className="h-11 w-11 grid place-items-center rounded-full bg-foreground text-background hover:bg-foreground/85 transition-colors"
-          >
-            {playing ? <Pause size={18} fill="currentColor" /> : <Play size={18} fill="currentColor" />}
-          </button>
-
+        <div className="flex items-center gap-2 md:gap-3 flex-wrap">
           <button
             type="button"
             onClick={toggleMute}
             aria-label={muted ? "Activer le son" : "Couper le son"}
-            className="h-10 w-10 grid place-items-center rounded-full border border-border bg-black/50 hover:bg-card-hover transition-colors"
+            className="h-9 w-9 grid place-items-center rounded-full border border-white/15 bg-black/40 hover:bg-black/70 text-white transition-colors"
           >
             {muted || volume === 0 ? <VolumeX size={16} /> : <Volume2 size={16} />}
           </button>
@@ -525,7 +838,7 @@ export function Player({
             </span>
           ) : null}
 
-          <div className="ml-auto flex items-center gap-2">
+          <div className="ml-auto flex items-center gap-2 flex-wrap">
             {hasMultiAudio ? (
               <ToolbarButton
                 active={panel === "audio"}
@@ -533,18 +846,26 @@ export function Player({
                 aria-label="Pistes audio"
                 title="Audio"
                 icon={<Languages size={16} />}
-                label={audioTrack >= 0 ? labelForTrack(audioTracks[audioTrack]) : ""}
+                label={audioTrack >= 0 ? audioLabels[audioTrack]?.label ?? "" : ""}
               />
             ) : null}
 
             {hasSubs ? (
               <ToolbarButton
-                active={subtitleTrack !== -1 || panel === "subtitles"}
+                active={
+                  subtitleTrack !== -1 || activeExternalId !== null || panel === "subtitles"
+                }
                 onClick={() => setPanel((p) => (p === "subtitles" ? "none" : "subtitles"))}
                 aria-label="Sous-titres"
                 title="Sous-titres"
                 icon={<Subtitles size={16} />}
-                label={subtitleTrack >= 0 ? labelForTrack(subtitleTracks[subtitleTrack]) : "Off"}
+                label={
+                  activeExternalId
+                    ? externalSubs.find((s) => s.id === activeExternalId)?.label ?? "Fichier"
+                    : subtitleTrack >= 0
+                      ? labelForTrack(subtitleTracks[subtitleTrack])
+                      : "Off"
+                }
               />
             ) : null}
 
@@ -574,10 +895,10 @@ export function Player({
               type="button"
               onClick={togglePip}
               aria-label="Picture-in-picture"
-              className={`h-10 w-10 grid place-items-center rounded-full border transition-colors ${
+              className={`h-9 w-9 grid place-items-center rounded-full border transition-colors ${
                 pip
                   ? "border-[var(--accent)] bg-[var(--accent)]/20 text-[var(--accent)]"
-                  : "border-border bg-black/50 hover:bg-card-hover"
+                  : "border-white/15 bg-black/40 hover:bg-black/70 text-white"
               }`}
             >
               <PictureInPicture2 size={16} />
@@ -587,30 +908,40 @@ export function Player({
               type="button"
               onClick={toggleFullscreen}
               aria-label={fullscreen ? "Quitter le plein écran" : "Plein écran"}
-              className="h-10 w-10 grid place-items-center rounded-full border border-border bg-black/50 hover:bg-card-hover transition-colors"
+              title="Plein écran (F)"
+              className="h-9 px-3 grid place-items-center rounded-full border border-white/15 bg-black/40 hover:bg-black/70 text-white transition-colors text-xs gap-1.5 flex items-center"
             >
               {fullscreen ? <Minimize size={16} /> : <Maximize size={16} />}
+              <span className="hidden md:inline">
+                {fullscreen ? "Quitter" : "Plein écran"}
+              </span>
             </button>
           </div>
         </div>
 
         {/* Panels */}
         {panel !== "none" ? (
-          <div className="absolute right-4 md:right-6 bottom-20 w-60 bg-card border border-border rounded-xl shadow-2xl text-sm overflow-hidden">
-            <div className="px-3 py-2 border-b border-border text-xs uppercase tracking-widest text-muted">
-              {panel === "quality" && "Qualité"}
-              {panel === "audio" && "Audio"}
-              {panel === "subtitles" && "Sous-titres"}
-              {panel === "speed" && "Vitesse"}
+          <div className="absolute right-4 md:right-6 bottom-20 w-64 bg-card border border-border rounded-xl shadow-2xl text-sm overflow-hidden z-30">
+            <div className="px-3 py-2 border-b border-border text-xs uppercase tracking-widest text-muted flex items-center justify-between">
+              <span>
+                {panel === "quality" && "Qualité"}
+                {panel === "audio" && "Audio"}
+                {panel === "subtitles" && "Sous-titres"}
+                {panel === "speed" && "Vitesse"}
+              </span>
+              <button
+                type="button"
+                onClick={() => setPanel("none")}
+                aria-label="Fermer"
+                className="h-6 w-6 grid place-items-center rounded hover:bg-card-hover"
+              >
+                <X size={14} />
+              </button>
             </div>
-            <div className="max-h-72 overflow-y-auto py-1">
+            <div className="max-h-80 overflow-y-auto py-1">
               {panel === "quality" && (
                 <>
-                  <Option
-                    label="Auto"
-                    active={currentLevel === -1}
-                    onClick={() => pickLevel(-1)}
-                  />
+                  <Option label="Auto" active={currentLevel === -1} onClick={() => pickLevel(-1)} />
                   {levels
                     .map((lvl, idx) => ({ lvl, idx }))
                     .sort((a, b) => (b.lvl.height ?? 0) - (a.lvl.height ?? 0))
@@ -639,17 +970,36 @@ export function Player({
                 <>
                   <Option
                     label="Désactivés"
-                    active={subtitleTrack === -1}
-                    onClick={() => pickSubtitle(-1)}
+                    active={subtitleTrack === -1 && activeExternalId === null}
+                    onClick={() => {
+                      pickSubtitle(-1);
+                      pickExternalSubtitle(null);
+                    }}
                   />
                   {subtitleTracks.map((t, idx) => (
                     <Option
-                      key={idx}
-                      label={labelForTrack(t)}
+                      key={`hls-${idx}`}
+                      label={`${labelForTrack(t)} · embarqué`}
                       active={subtitleTrack === idx}
                       onClick={() => pickSubtitle(idx)}
                     />
                   ))}
+                  {externalSubs.map((s) => (
+                    <Option
+                      key={s.id}
+                      label={`${s.label} · fichier`}
+                      active={activeExternalId === s.id}
+                      onClick={() => pickExternalSubtitle(s.id)}
+                    />
+                  ))}
+                  <button
+                    type="button"
+                    onClick={() => subUploadRef.current?.click()}
+                    className="w-full text-left px-3 py-2.5 hover:bg-card-hover transition-colors flex items-center gap-2 text-[var(--accent)] border-t border-border mt-1"
+                  >
+                    <Upload size={14} />
+                    Charger un fichier .srt / .vtt
+                  </button>
                 </>
               )}
 
@@ -665,27 +1015,52 @@ export function Player({
             </div>
           </div>
         ) : null}
-
-        <p className="text-[10px] text-muted/80 mt-3 hidden md:block">
-          <kbd className="bg-background/80 border border-border rounded px-1.5 py-0.5">Espace</kbd> lecture ·
-          <kbd className="bg-background/80 border border-border rounded px-1.5 py-0.5 ml-1">M</kbd> muet ·
-          <kbd className="bg-background/80 border border-border rounded px-1.5 py-0.5 ml-1">F</kbd> plein écran ·
-          <kbd className="bg-background/80 border border-border rounded px-1.5 py-0.5 ml-1">P</kbd> PiP ·
-          <kbd className="bg-background/80 border border-border rounded px-1.5 py-0.5 ml-1">↑↓</kbd> volume
-          {isVod ? (
-            <>
-              {" · "}
-              <kbd className="bg-background/80 border border-border rounded px-1.5 py-0.5">J/L</kbd> -10s/+10s
-            </>
-          ) : null}
-          {hasSubs ? (
-            <>
-              {" · "}
-              <kbd className="bg-background/80 border border-border rounded px-1.5 py-0.5">C</kbd> sous-titres
-            </>
-          ) : null}
-        </p>
       </div>
+
+      {/* Shortcuts cheat-sheet modal */}
+      {showShortcuts ? (
+        <div
+          className="absolute inset-0 z-40 bg-black/80 backdrop-blur grid place-items-center p-4"
+          onClick={() => setShowShortcuts(false)}
+        >
+          <div
+            onClick={(e) => e.stopPropagation()}
+            className="bg-card border border-border rounded-2xl shadow-2xl p-6 max-w-md w-full"
+          >
+            <div className="flex items-center justify-between mb-4">
+              <h2 className="text-lg font-bold flex items-center gap-2">
+                <Keyboard size={18} /> Raccourcis clavier
+              </h2>
+              <button
+                type="button"
+                onClick={() => setShowShortcuts(false)}
+                className="h-8 w-8 grid place-items-center rounded hover:bg-card-hover"
+                aria-label="Fermer"
+              >
+                <X size={16} />
+              </button>
+            </div>
+            <div className="space-y-2 text-sm">
+              <Shortcut keys={["Espace", "K"]} label="Lecture / pause" />
+              <Shortcut keys={["F"]} label="Plein écran" />
+              <Shortcut keys={["M"]} label="Couper le son" />
+              <Shortcut keys={["P"]} label="Picture-in-picture" />
+              <Shortcut keys={["↑", "↓"]} label="Volume" />
+              {isVod ? (
+                <>
+                  <Shortcut keys={["J", "L"]} label={`Reculer / avancer de ${SKIP_SECONDS}s`} />
+                  <Shortcut keys={["← →"]} label="Épisode / chaîne précédent ou suivant" />
+                </>
+              ) : (
+                <Shortcut keys={["← →"]} label="Chaîne précédente / suivante" />
+              )}
+              {hasSubs ? <Shortcut keys={["C"]} label="Cycler les sous-titres" /> : null}
+              <Shortcut keys={["L (hors player)"]} label="Ajouter aux favoris" />
+              <Shortcut keys={["?", "H"]} label="Afficher cette aide" />
+            </div>
+          </div>
+        </div>
+      ) : null}
     </div>
   );
 }
@@ -715,15 +1090,15 @@ function ToolbarButton({
     <button
       type="button"
       onClick={onClick}
-      className={`h-10 px-3 rounded-full border transition-colors text-xs flex items-center gap-1.5 ${
+      className={`h-9 px-3 rounded-full border transition-colors text-xs flex items-center gap-1.5 ${
         active
           ? "border-[var(--accent)] bg-[var(--accent)]/20 text-[var(--accent)]"
-          : "border-border bg-black/50 hover:bg-card-hover"
+          : "border-white/15 bg-black/40 hover:bg-black/70 text-white"
       }`}
       {...rest}
     >
       {icon}
-      {label ? <span className="hidden md:inline">{label}</span> : null}
+      {label ? <span className="hidden md:inline truncate max-w-[100px]">{label}</span> : null}
     </button>
   );
 }
@@ -748,5 +1123,23 @@ function Option({
       <span className="truncate">{label}</span>
       {active ? <Check size={14} className="shrink-0" /> : null}
     </button>
+  );
+}
+
+function Shortcut({ keys, label }: { keys: string[]; label: string }) {
+  return (
+    <div className="flex items-center justify-between gap-3 px-3 py-2 bg-background border border-border rounded-md">
+      <span className="text-muted">{label}</span>
+      <span className="flex items-center gap-1">
+        {keys.map((k) => (
+          <kbd
+            key={k}
+            className="text-xs bg-card border border-border rounded px-1.5 py-0.5 font-mono"
+          >
+            {k}
+          </kbd>
+        ))}
+      </span>
+    </div>
   );
 }
