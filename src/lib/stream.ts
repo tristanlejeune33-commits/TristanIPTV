@@ -1,9 +1,17 @@
 /**
  * Wrap a remote stream URL through our same-origin proxy so the browser
  * doesn't have to deal with CORS / UA restrictions from the IPTV provider.
+ *
+ * IMPORTANT: must be an absolute URL when used from a Web Worker context
+ * (mpegts.js + hls.js workers cannot resolve relative URLs because their
+ * `self.location` doesn't carry the page origin).
  */
 export function proxiedStreamUrl(originalUrl: string): string {
-  return `/api/hls?url=${encodeURIComponent(originalUrl)}`;
+  const path = `/api/hls?url=${encodeURIComponent(originalUrl)}`;
+  if (typeof window !== "undefined" && window.location?.origin) {
+    return `${window.location.origin}${path}`;
+  }
+  return path;
 }
 
 export type StreamType = "hls" | "mpegts" | "native";

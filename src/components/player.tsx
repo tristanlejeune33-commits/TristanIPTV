@@ -152,11 +152,18 @@ export function Player({
   const displayedError = errorMsg ?? capabilityError;
 
   // Codec hints — most browsers can't play H.265/HEVC in MSE without OS-level
-  // support. Detect from the channel name / group string and surface a tip.
-  const hevcHint = useMemo(() => {
+  // support. Detect from the channel name / group string AND only surface the
+  // tip when the actual error looks codec-related (Media/Decode/Format), not
+  // for plain network/URL failures.
+  const hevcInName = useMemo(() => {
     if (!codecHint) return false;
     return /\b(hevc|h\.?265|x265)\b/i.test(codecHint);
   }, [codecHint]);
+  const errorLooksCodec = useMemo(() => {
+    if (!displayedError) return false;
+    return /media|decode|format|codec|appendBuffer/i.test(displayedError);
+  }, [displayedError]);
+  const showHevcHint = hevcInName && errorLooksCodec;
 
   const subUploadRef = useRef<HTMLInputElement>(null);
 
@@ -769,7 +776,7 @@ export function Player({
               {displayedError}
             </p>
 
-            {hevcHint ? (
+            {showHevcHint ? (
               <div className="text-left text-sm bg-amber-500/10 border border-amber-500/30 text-amber-200 rounded-lg p-3 mb-4">
                 <p className="font-semibold mb-1">
                   ⚠️ Cette chaîne est probablement encodée en HEVC (H.265)
