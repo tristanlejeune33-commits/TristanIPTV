@@ -38,6 +38,14 @@ export default function SettingsPage() {
     });
   }
 
+  function retry() {
+    if (!currentUrl) return;
+    // Force a re-run of the loader by toggling the URL
+    setM3uUrl(null);
+    setTimeout(() => setM3uUrl(currentUrl), 50);
+    toast("Nouvelle tentative…");
+  }
+
   function clearAll() {
     setM3uUrl(null);
     setInput("");
@@ -85,14 +93,25 @@ export default function SettingsPage() {
             </button>
 
             {currentUrl ? (
-              <button
-                type="button"
-                onClick={clearAll}
-                className="inline-flex items-center gap-2 h-11 px-4 rounded-md border border-border hover:bg-card-hover text-muted hover:text-foreground transition-colors"
-              >
-                <Trash2 size={16} />
-                Supprimer le lien
-              </button>
+              <>
+                <button
+                  type="button"
+                  onClick={retry}
+                  disabled={loading}
+                  className="inline-flex items-center gap-2 h-11 px-4 rounded-md border border-border bg-card hover:bg-card-hover transition-colors disabled:opacity-40"
+                >
+                  <Loader2 size={16} className={loading ? "animate-spin" : ""} />
+                  Réessayer
+                </button>
+                <button
+                  type="button"
+                  onClick={clearAll}
+                  className="inline-flex items-center gap-2 h-11 px-4 rounded-md border border-border hover:bg-card-hover text-muted hover:text-foreground transition-colors"
+                >
+                  <Trash2 size={16} />
+                  Supprimer le lien
+                </button>
+              </>
             ) : null}
           </div>
 

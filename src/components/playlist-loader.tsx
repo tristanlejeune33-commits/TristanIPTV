@@ -4,13 +4,12 @@ import { useEffect } from "react";
 import { usePlaylistStore } from "@/lib/store";
 import { parseM3U } from "@/lib/m3u-parser";
 
-const FETCH_TIMEOUT_MS = 90_000; // 90s to give very large playlists / slow IPTV providers a chance
+const FETCH_TIMEOUT_MS = 120_000; // 2 min, generous for huge IPTV catalogs
 
 function fmtMb(bytes: number): string {
   return `${(bytes / 1024 / 1024).toFixed(1)} Mo`;
 }
 
-/** Yield to the browser so the UI can paint between heavy steps. */
 function nextTick(): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, 0));
 }
@@ -18,8 +17,10 @@ function nextTick(): Promise<void> {
 /**
  * Mounts once at the root layout level.
  * Watches m3uUrl in the store and fetches/parses the playlist whenever it changes.
- * Streams the response with progress reporting so Safari iOS users don't stare
- * at a frozen spinner on multi-MB playlists.
+ *
+ * Streaming approach: read the response body in chunks so we can show real
+ * download progress on huge playlists. Falls back to a plain text() read if
+ * the browser doesn't expose a body reader (older Safari).
  */
 export function PlaylistLoader() {
   const m3uUrl = usePlaylistStore((s) => s.m3uUrl);
@@ -44,6 +45,7 @@ export function PlaylistLoader() {
       setError(null);
       setProgress("Connexion au serveur…");
 
+      let text: string;
       try {
         const proxied = `/api/m3u?url=${encodeURIComponent(m3uUrl!)}`;
         const res = await fetch(proxied, {
@@ -55,47 +57,54 @@ export function PlaylistLoader() {
           throw new Error(`Le serveur a répondu HTTP ${res.status}`);
         }
 
-        // Stream the body so we can show real download progress
-        const reader = res.body?.getReader();
         const contentLength = parseInt(
           res.headers.get("content-length") ?? "0",
           10
         );
 
-        let text: string;
+        // Try streaming read for progress; fall back to text() on any failure.
+        const reader = res.body?.getReader();
         if (reader) {
-          const chunks: Uint8Array[] = [];
-          let received = 0;
-          let lastUpdate = 0;
-          // eslint-disable-next-line no-constant-condition
-          while (true) {
-            const { done, value } = await reader.read();
-            if (done) break;
-            if (cancelled) {
-              reader.cancel().catch(() => {});
-              return;
+          try {
+            const chunks: Uint8Array[] = [];
+            let received = 0;
+            let lastUpdate = 0;
+            // eslint-disable-next-line no-constant-condition
+            while (true) {
+              const { done, value } = await reader.read();
+              if (done) break;
+              if (cancelled) {
+                reader.cancel().catch(() => {});
+                return;
+              }
+              chunks.push(value);
+              received += value.length;
+              if (Date.now() - lastUpdate > 250) {
+                lastUpdate = Date.now();
+                setProgress(
+                  contentLength > 0
+                    ? `Téléchargement ${fmtMb(received)} / ${fmtMb(contentLength)}`
+                    : `Téléchargement ${fmtMb(received)}`
+                );
+              }
             }
-            chunks.push(value);
-            received += value.length;
-            // Throttle UI updates so we don't re-render on every chunk
-            if (Date.now() - lastUpdate > 250) {
-              lastUpdate = Date.now();
-              setProgress(
-                contentLength > 0
-                  ? `Téléchargement ${fmtMb(received)} / ${fmtMb(contentLength)}`
-                  : `Téléchargement ${fmtMb(received)}`
-              );
-            }
+            setProgress(`Téléchargement terminé (${fmtMb(received)})`);
+            await nextTick();
+            const blob = new Blob(chunks as unknown as BlobPart[]);
+            text = await blob.text();
+          } catch {
+            // If streaming failed mid-read, fall back to a fresh plain fetch
+            setProgress("Téléchargement en cours…");
+            const res2 = await fetch(proxied, {
+              cache: "no-store",
+              signal: controller.signal,
+            });
+            if (!res2.ok) throw new Error(`HTTP ${res2.status}`);
+            text = await res2.text();
           }
-          setProgress(`Téléchargement ${fmtMb(received)} — terminé`);
-          // Concatenate chunks to text on the next tick to let UI paint
-          await nextTick();
-          // Cast: Uint8Array is a valid BlobPart at runtime; TS lib types are
-          // too strict about ArrayBufferLike vs ArrayBuffer here.
-          const blob = new Blob(chunks as unknown as BlobPart[]);
-          text = await blob.text();
         } else {
-          // Fallback (no streaming API)
+          // No body reader exposed — go straight to text()
+          setProgress("Téléchargement en cours…");
           text = await res.text();
         }
 
@@ -124,16 +133,21 @@ export function PlaylistLoader() {
           err instanceof DOMException && err.name === "AbortError";
         if (isAbort) {
           setError(
-            `Délai dépassé (${FETCH_TIMEOUT_MS / 1000}s). Le serveur IPTV ne répond pas ou la playlist est trop grosse.`
+            `Délai dépassé (${FETCH_TIMEOUT_MS / 1000}s). Le serveur IPTV ne répond pas ou la playlist est trop volumineuse.`
           );
         } else {
-          setError(err instanceof Error ? err.message : "Erreur inconnue");
+          const msg = err instanceof Error ? err.message : "Erreur inconnue";
+          setError(
+            msg.toLowerCase().includes("load failed") ||
+              msg.toLowerCase().includes("network")
+              ? `${msg}. Vérifie ta connexion WiFi et réessaie.`
+              : msg
+          );
         }
         setPlaylist(null);
       } finally {
         if (!cancelled) {
           setLoading(false);
-          // Keep the success message briefly, then clear
           setTimeout(() => {
             if (!cancelled) setProgress(null);
           }, 1500);
