@@ -24,6 +24,10 @@ export type Channel = {
   type: ContentType;
   isFrench: boolean;
   seriesInfo: SeriesInfo | null;
+  /** Production year extracted from title if any */
+  year: number | null;
+  /** Original index in the M3U playlist (used as a recency tie-breaker) */
+  orderIndex: number;
 };
 
 export type ShowGroup = {
@@ -33,6 +37,10 @@ export type ShowGroup = {
   group: string;
   /** Sorted by season then episode */
   episodes: Channel[];
+  /** Most recent year across all episodes (used for "latest first" sorting) */
+  latestYear: number | null;
+  /** Smallest orderIndex of episodes (newer M3U entries usually come first) */
+  firstOrderIndex: number;
 };
 
 export type ParsedPlaylist = {
@@ -90,6 +98,7 @@ export function parseM3U(text: string): ParsedPlaylist {
   let pendingName: string | null = null;
   let pendingAttrs: Record<string, string> = {};
   let pendingGroup: string | null = null;
+  let orderCounter = 0;
 
   for (let i = 0; i < lines.length; i++) {
     const raw = lines[i];
@@ -140,6 +149,8 @@ export function parseM3U(text: string): ParsedPlaylist {
       type: classification.type,
       isFrench: classification.isFrench,
       seriesInfo: classification.seriesInfo,
+      year: classification.year,
+      orderIndex: orderCounter++,
     });
 
     pendingName = null;
@@ -174,14 +185,25 @@ export function parseM3U(text: string): ParsedPlaylist {
 
   // By type
   const liveChannels = dedup.filter((c) => c.type === "live");
-  const movieChannels = dedup.filter((c) => c.type === "movie");
+
+  // VOD: latest releases first (year desc, then original M3U order — IPTV providers
+  // typically push new additions at the top of their lists, so a lower orderIndex
+  // is more recent).
+  const movieChannels = dedup
+    .filter((c) => c.type === "movie")
+    .sort((a, b) => {
+      if (a.isFrench !== b.isFrench) return a.isFrench ? -1 : 1;
+      const ya = a.year ?? -1;
+      const yb = b.year ?? -1;
+      if (ya !== yb) return yb - ya;
+      return a.orderIndex - b.orderIndex;
+    });
   const seriesEpisodes = dedup.filter((c) => c.type === "series");
 
   // Shows index
   const shows: Record<string, ShowGroup> = {};
   for (const ep of seriesEpisodes) {
     const info = ep.seriesInfo;
-    // Fallback: if no parsed seriesInfo, treat the channel itself as a "show" with 1 episode
     const showName = info?.show ?? ep.name;
     const showSlug = info?.showSlug ?? slugify(ep.name);
     if (!shows[showSlug]) {
@@ -191,11 +213,15 @@ export function parseM3U(text: string): ParsedPlaylist {
         isFrench: ep.isFrench,
         group: ep.group,
         episodes: [],
+        latestYear: ep.year,
+        firstOrderIndex: ep.orderIndex,
       };
     }
-    shows[showSlug].episodes.push(ep);
-    // A show is French if any of its episodes is French
-    if (ep.isFrench) shows[showSlug].isFrench = true;
+    const g = shows[showSlug];
+    g.episodes.push(ep);
+    if (ep.isFrench) g.isFrench = true;
+    if (ep.year && (g.latestYear === null || ep.year > g.latestYear)) g.latestYear = ep.year;
+    if (ep.orderIndex < g.firstOrderIndex) g.firstOrderIndex = ep.orderIndex;
   }
   for (const slug of Object.keys(shows)) {
     shows[slug].episodes.sort((a, b) => {
@@ -207,11 +233,15 @@ export function parseM3U(text: string): ParsedPlaylist {
       return ea - eb;
     });
   }
+  // Shows: French first, then latest year desc, then earliest M3U appearance
   const showsSorted = Object.keys(shows).sort((a, b) => {
     const A = shows[a];
     const B = shows[b];
     if (A.isFrench !== B.isFrench) return A.isFrench ? -1 : 1;
-    return A.show.localeCompare(B.show, "fr");
+    const ya = A.latestYear ?? -1;
+    const yb = B.latestYear ?? -1;
+    if (ya !== yb) return yb - ya;
+    return A.firstOrderIndex - B.firstOrderIndex;
   });
 
   return {

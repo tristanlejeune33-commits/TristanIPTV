@@ -336,6 +336,7 @@ export default function WatchPage({
             src={channel.url}
             poster={channel.logo}
             startTime={resumeChoice === "resume" ? savedPosition : undefined}
+            isVod={isVod}
             onTimeUpdate={onTime}
           />
         ) : null}

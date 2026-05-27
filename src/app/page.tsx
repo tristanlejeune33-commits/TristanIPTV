@@ -7,6 +7,8 @@ import { Rail } from "@/components/rail";
 import { ShowRail } from "@/components/show-rail";
 import { EmptyState } from "@/components/empty-state";
 import { SkeletonHero, SkeletonRail } from "@/components/skeleton";
+import { TypeShortcuts } from "@/components/type-shortcuts";
+import { LazySection } from "@/components/lazy-section";
 
 const MAX_PER_RAIL = 24;
 
@@ -29,8 +31,13 @@ export default function Home() {
 
   const featuredChannel = useMemo(() => {
     if (!playlist || playlist.channels.length === 0 || timeBucket === null) return null;
-    const french = playlist.channels.filter((c) => c.isFrench);
-    const pool = french.length > 0 ? french : playlist.channels;
+    const frenchLive = playlist.liveChannels.filter((c) => c.isFrench);
+    const pool =
+      frenchLive.length > 0
+        ? frenchLive
+        : playlist.liveChannels.length > 0
+          ? playlist.liveChannels
+          : playlist.channels;
     return pool[timeBucket % pool.length];
   }, [playlist, timeBucket]);
 
@@ -47,6 +54,18 @@ export default function Home() {
       .map((h) => playlist.channels.find((c) => c.id === h.channelId))
       .filter((c): c is NonNullable<typeof c> => c !== undefined);
   }, [playlist, history]);
+
+  const recentMovies = useMemo(
+    () => playlist?.movieChannels.slice(0, MAX_PER_RAIL) ?? [],
+    [playlist]
+  );
+
+  const recentShows = useMemo(() => {
+    if (!playlist) return [];
+    return playlist.showsSorted
+      .map((s) => playlist.shows[s])
+      .slice(0, MAX_PER_RAIL);
+  }, [playlist]);
 
   const frenchLive = useMemo(
     () => playlist?.liveChannels.filter((c) => c.isFrench).slice(0, MAX_PER_RAIL) ?? [],
@@ -66,27 +85,14 @@ export default function Home() {
       .slice(0, MAX_PER_RAIL);
   }, [playlist]);
 
-  const otherShows = useMemo(() => {
-    if (!playlist) return [];
-    return playlist.showsSorted
-      .map((s) => playlist.shows[s])
-      .filter((s) => !s.isFrench)
-      .slice(0, MAX_PER_RAIL);
-  }, [playlist]);
-
   const internationalLive = useMemo(
     () => playlist?.liveChannels.filter((c) => !c.isFrench).slice(0, MAX_PER_RAIL) ?? [],
     [playlist]
   );
 
-  const internationalMovies = useMemo(
-    () => playlist?.movieChannels.filter((c) => !c.isFrench).slice(0, MAX_PER_RAIL) ?? [],
-    [playlist]
-  );
-
   const topGroups = useMemo(() => {
     if (!playlist) return [];
-    return playlist.groupsSorted.slice(0, 15);
+    return playlist.groupsSorted.slice(0, 12);
   }, [playlist]);
 
   if (!m3uUrl) {
@@ -143,6 +149,14 @@ export default function Home() {
       {featuredChannel ? <Hero channel={featuredChannel} /> : null}
 
       <div className="-mt-24 relative z-10 space-y-2">
+        {/* Big top shortcuts — clear TV / Films / Series separation */}
+        <TypeShortcuts
+          liveCount={playlist.liveChannels.length}
+          movieCount={playlist.movieChannels.length}
+          seriesCount={playlist.showsSorted.length}
+        />
+
+        {/* Continue / favorites — always visible */}
         {continueWatching.length > 0 ? (
           <Rail title="Continuer à regarder" channels={continueWatching} />
         ) : null}
@@ -151,60 +165,78 @@ export default function Home() {
           <Rail title="Mes favoris" channels={favoriteChannels} href="/favorites" />
         ) : null}
 
-        {/* French priority section */}
+        {/* Latest releases */}
+        {recentMovies.length > 0 ? (
+          <LazySection>
+            <Rail
+              title="Derniers films ajoutés"
+              channels={recentMovies}
+              href="/movies"
+            />
+          </LazySection>
+        ) : null}
+
+        {recentShows.length > 0 ? (
+          <LazySection>
+            <ShowRail
+              title="Dernières séries ajoutées"
+              shows={recentShows}
+              href="/series"
+            />
+          </LazySection>
+        ) : null}
+
+        {/* French priority */}
         {frenchLive.length > 0 ? (
-          <Rail
-            title="🇫🇷 Chaînes françaises en direct"
-            channels={frenchLive}
-            href="/live"
-          />
+          <LazySection>
+            <Rail
+              title="🇫🇷 Chaînes françaises en direct"
+              channels={frenchLive}
+              href="/live"
+            />
+          </LazySection>
         ) : null}
 
         {frenchMovies.length > 0 ? (
-          <Rail
-            title="🇫🇷 Films français"
-            channels={frenchMovies}
-            href="/movies"
-          />
+          <LazySection>
+            <Rail
+              title="🇫🇷 Films français"
+              channels={frenchMovies}
+              href="/movies"
+            />
+          </LazySection>
         ) : null}
 
         {frenchShows.length > 0 ? (
-          <ShowRail
-            title="🇫🇷 Séries françaises"
-            shows={frenchShows}
-            href="/series"
-          />
+          <LazySection>
+            <ShowRail
+              title="🇫🇷 Séries françaises"
+              shows={frenchShows}
+              href="/series"
+            />
+          </LazySection>
         ) : null}
 
         {/* International */}
         {internationalLive.length > 0 ? (
-          <Rail
-            title="Chaînes internationales en direct"
-            channels={internationalLive}
-            href="/live"
-          />
+          <LazySection>
+            <Rail
+              title="Chaînes internationales en direct"
+              channels={internationalLive}
+              href="/live"
+            />
+          </LazySection>
         ) : null}
 
-        {internationalMovies.length > 0 ? (
-          <Rail
-            title="Films internationaux"
-            channels={internationalMovies}
-            href="/movies"
-          />
-        ) : null}
-
-        {otherShows.length > 0 ? (
-          <ShowRail title="Autres séries" shows={otherShows} href="/series" />
-        ) : null}
-
-        {/* Raw groups for discovery */}
+        {/* Raw groups for discovery (lazy + capped) */}
         {topGroups.map((group) => (
-          <Rail
-            key={group}
-            title={group}
-            channels={playlist.groups[group].slice(0, MAX_PER_RAIL)}
-            href={`/category/${encodeURIComponent(group)}`}
-          />
+          <LazySection key={group}>
+            <Rail
+              title={group}
+              channels={playlist.groups[group].slice(0, MAX_PER_RAIL)}
+              href={`/category/${encodeURIComponent(group)}`}
+            />
+          </LazySection>
         ))}
       </div>
     </div>

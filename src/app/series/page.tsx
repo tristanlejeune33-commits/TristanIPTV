@@ -4,6 +4,7 @@ import { useMemo, useState } from "react";
 import { Search } from "lucide-react";
 import { usePlaylistStore } from "@/lib/store";
 import { ShowCard } from "@/components/show-card";
+import { InfiniteGrid } from "@/components/infinite-grid";
 import { EmptyState } from "@/components/empty-state";
 
 export default function SeriesPage() {
@@ -78,7 +79,7 @@ export default function SeriesPage() {
         </p>
       </header>
 
-      <div className="flex flex-wrap items-center gap-3 mb-8">
+      <div className="flex flex-wrap items-center gap-3 mb-8 sticky top-16 z-20 bg-background/80 backdrop-blur-md py-3 -mx-2 px-2 rounded-2xl">
         <div className="relative flex-1 min-w-[220px] max-w-md">
           <Search
             size={16}
@@ -102,18 +103,19 @@ export default function SeriesPage() {
           }`}
           aria-pressed={frOnly}
         >
-          🇫🇷 Français uniquement
+          🇫🇷 Français
         </button>
       </div>
 
       {filtered.length === 0 ? (
         <p className="text-muted">Aucune série correspondante.</p>
       ) : (
-        <div className="grid grid-cols-[repeat(auto-fill,minmax(180px,1fr))] gap-4">
-          {filtered.map((s) => (
-            <ShowCard key={s.showSlug} show={s} />
-          ))}
-        </div>
+        <InfiniteGrid
+          items={filtered}
+          pageSize={48}
+          className="grid grid-cols-[repeat(auto-fill,minmax(180px,1fr))] gap-4"
+          render={(s) => <ShowCard key={s.showSlug} show={s} />}
+        />
       )}
     </div>
   );

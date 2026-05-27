@@ -1,5 +1,6 @@
 "use client";
 
+import { memo } from "react";
 import Link from "next/link";
 import { motion } from "framer-motion";
 import { Play, Heart } from "lucide-react";
@@ -8,7 +9,7 @@ import type { Channel } from "@/lib/m3u-parser";
 import { usePlaylistStore } from "@/lib/store";
 import { ChannelThumbnail } from "./channel-thumbnail";
 
-export function ChannelCard({
+function ChannelCardImpl({
   channel,
   size = "md",
 }: {
@@ -66,6 +67,20 @@ export function ChannelCard({
             </button>
           </div>
         </div>
+
+        {/* Always-visible small badges (FR / year) */}
+        <div className="absolute top-2 left-2 flex items-center gap-1.5">
+          {channel.isFrench ? (
+            <span className="text-[10px] font-bold bg-[var(--accent)] text-white px-1.5 py-0.5 rounded">
+              FR
+            </span>
+          ) : null}
+          {channel.year ? (
+            <span className="text-[10px] font-mono bg-black/70 text-white px-1.5 py-0.5 rounded backdrop-blur">
+              {channel.year}
+            </span>
+          ) : null}
+        </div>
       </Link>
 
       <div className="mt-2 px-1">
@@ -77,3 +92,5 @@ export function ChannelCard({
     </motion.div>
   );
 }
+
+export const ChannelCard = memo(ChannelCardImpl);

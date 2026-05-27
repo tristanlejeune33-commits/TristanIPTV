@@ -2,9 +2,9 @@ import type { MetadataRoute } from "next";
 
 export default function manifest(): MetadataRoute.Manifest {
   return {
-    name: "Netflix — IPTV Player",
-    short_name: "Netflix IPTV",
-    description: "Lecteur M3U avec interface inspirée de Netflix",
+    name: "LE JEUNE IPTV",
+    short_name: "LE JEUNE",
+    description: "Lecteur M3U / IPTV moderne — chaînes en direct, films, séries",
     start_url: "/",
     display: "standalone",
     background_color: "#0a0a0a",

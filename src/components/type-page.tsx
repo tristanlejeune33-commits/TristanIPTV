@@ -3,12 +3,14 @@
 import { useMemo, useState } from "react";
 import { Search } from "lucide-react";
 import { ChannelCard } from "./channel-card";
+import { InfiniteGrid } from "./infinite-grid";
 import type { Channel } from "@/lib/m3u-parser";
 import { EmptyState } from "./empty-state";
 
 /**
  * Generic page layout for content-type pages (/live, /movies).
- * - French-first sort, FR filter toggle, group filter, text search.
+ * - French-first sort, FR filter toggle, group filter, text search,
+ *   infinite scroll for large catalogs.
  */
 export function TypePage({
   title,
@@ -46,16 +48,12 @@ export function TypePage({
     if (q) {
       const tokens = q.split(/\s+/).filter(Boolean);
       list = list.filter((c) =>
-        tokens.every((t) =>
-          `${c.name} ${c.group}`.toLowerCase().includes(t)
-        )
+        tokens.every((t) => `${c.name} ${c.group}`.toLowerCase().includes(t))
       );
     }
-    // Sort: FR first then name
-    return [...list].sort((a, b) => {
-      if (a.isFrench !== b.isFrench) return a.isFrench ? -1 : 1;
-      return a.name.localeCompare(b.name, "fr");
-    });
+    // List is already sorted upstream (FR-first, year desc for VOD).
+    // Don't resort — preserve "latest releases first" order.
+    return list;
   }, [channels, frOnly, group, query]);
 
   if (channels.length === 0) {
@@ -89,7 +87,7 @@ export function TypePage({
         </p>
       </header>
 
-      <div className="flex flex-wrap items-center gap-3 mb-8">
+      <div className="flex flex-wrap items-center gap-3 mb-8 sticky top-16 md:top-16 z-20 bg-background/80 backdrop-blur-md py-3 -mx-2 px-2 rounded-2xl">
         <div className="relative flex-1 min-w-[220px] max-w-md">
           <Search
             size={16}
@@ -113,16 +111,16 @@ export function TypePage({
           }`}
           aria-pressed={frOnly}
         >
-          🇫🇷 Français uniquement
+          🇫🇷 Français
         </button>
 
         {allGroups.length > 1 ? (
           <select
             value={group}
             onChange={(e) => setGroup(e.target.value)}
-            className="h-11 px-3 rounded-full bg-card border border-border text-sm focus:outline-none focus:border-foreground/40"
+            className="h-11 px-3 rounded-full bg-card border border-border text-sm focus:outline-none focus:border-foreground/40 max-w-[240px] truncate"
           >
-            <option value="all">Toutes les catégories</option>
+            <option value="all">Toutes les catégories ({allGroups.length})</option>
             {allGroups.map((g) => (
               <option key={g} value={g}>
                 {g}
@@ -135,11 +133,12 @@ export function TypePage({
       {filtered.length === 0 ? (
         <p className="text-muted">Aucun résultat avec ces filtres.</p>
       ) : (
-        <div className="grid grid-cols-[repeat(auto-fill,minmax(220px,1fr))] gap-x-4 gap-y-8">
-          {filtered.map((ch) => (
-            <ChannelCard key={ch.id} channel={ch} />
-          ))}
-        </div>
+        <InfiniteGrid
+          items={filtered}
+          pageSize={60}
+          className="grid grid-cols-[repeat(auto-fill,minmax(220px,1fr))] gap-x-4 gap-y-8"
+          render={(ch) => <ChannelCard key={ch.id} channel={ch} />}
+        />
       )}
     </div>
   );

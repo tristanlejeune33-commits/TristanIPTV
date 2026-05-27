@@ -1,12 +1,12 @@
 "use client";
 
-import { useRef } from "react";
+import { memo, useRef } from "react";
 import Link from "next/link";
 import { ChevronLeft, ChevronRight, ArrowRight } from "lucide-react";
 import { ChannelCard } from "./channel-card";
 import type { Channel } from "@/lib/m3u-parser";
 
-export function Rail({
+function RailImpl({
   title,
   channels,
   href,
@@ -82,3 +82,5 @@ export function Rail({
     </section>
   );
 }
+
+export const Rail = memo(RailImpl);

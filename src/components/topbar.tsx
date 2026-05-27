@@ -57,10 +57,15 @@ export function Topbar() {
     >
       <div className="mx-auto max-w-[1600px] px-4 md:px-8 h-16 flex items-center gap-4">
         <Link href="/" className="flex items-center gap-2 shrink-0">
-          <span className="text-[var(--accent)] font-black text-2xl tracking-tighter">
-            NETFLIX
-          </span>
-          <span className="text-xs text-muted hidden lg:inline-block uppercase tracking-widest">
+          <div className="grid grid-cols-2 gap-0.5">
+            <span className="text-[var(--accent)] font-black text-lg leading-none tracking-tighter">
+              LE
+            </span>
+            <span className="text-foreground font-black text-lg leading-none tracking-tighter">
+              JEUNE
+            </span>
+          </div>
+          <span className="text-xs text-muted hidden md:inline-block uppercase tracking-widest font-mono">
             IPTV
           </span>
         </Link>

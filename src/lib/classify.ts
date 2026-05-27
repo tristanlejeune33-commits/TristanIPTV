@@ -22,6 +22,8 @@ export type Classification = {
   type: ContentType;
   isFrench: boolean;
   seriesInfo: SeriesInfo | null;
+  /** Production year extracted from title (e.g. "Inception (2010)") if present */
+  year: number | null;
 };
 
 // --- French detection --------------------------------------------------------
@@ -173,6 +175,19 @@ export function extractSeriesInfo(name: string): SeriesInfo | null {
 
 // --- Combined ---------------------------------------------------------------
 
+const YEAR_REGEX = /(?:^|[\s\(\[\.\-])((?:19|20)\d{2})(?:[\s\)\]\.\-]|$)/;
+
+/** Extract a 4-digit production year from a title if it looks plausible. */
+export function extractYear(name: string): number | null {
+  const now = new Date().getFullYear();
+  const m = name.match(YEAR_REGEX);
+  if (!m) return null;
+  const y = parseInt(m[1], 10);
+  if (!Number.isFinite(y)) return null;
+  if (y < 1920 || y > now + 1) return null;
+  return y;
+}
+
 export function classify(input: {
   name: string;
   group: string;
@@ -186,6 +201,7 @@ export function classify(input: {
     type,
     isFrench: isFrenchChannel(input),
     seriesInfo,
+    year: type === "movie" || type === "series" ? extractYear(input.name) : null,
   };
 }
 

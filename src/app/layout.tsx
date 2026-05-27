@@ -17,12 +17,12 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "Netflix — IPTV",
+  title: "LE JEUNE IPTV — Chaînes, films et séries",
   description:
-    "Lecteur M3U avec interface inspirée de Netflix. Favoris, historique, recherche et command palette.",
-  applicationName: "Netflix IPTV",
+    "Lecteur M3U / IPTV moderne. Chaînes en direct, films, séries avec interface inspirée des grandes plateformes de streaming.",
+  applicationName: "LE JEUNE IPTV",
   manifest: "/manifest.webmanifest",
-  appleWebApp: { capable: true, statusBarStyle: "black-translucent" },
+  appleWebApp: { capable: true, statusBarStyle: "black-translucent", title: "LE JEUNE IPTV" },
 };
 
 export const viewport: Viewport = {
