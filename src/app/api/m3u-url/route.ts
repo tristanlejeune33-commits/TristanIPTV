@@ -17,8 +17,10 @@ import path from "node:path";
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
-const STATE_DIR = path.join(process.cwd(), ".le-jeune-iptv");
+const STATE_DIR = path.join(process.cwd(), ".tristan-iptv");
 const STATE_FILE = path.join(STATE_DIR, "state.json");
+// Old location from the previous branding — migrate transparently if present.
+const LEGACY_FILE = path.join(process.cwd(), ".le-jeune-iptv", "state.json");
 
 type State = {
   m3uUrl: string | null;
@@ -33,7 +35,17 @@ async function readState(): Promise<State> {
       return parsed as State;
     }
   } catch {
-    // file missing or invalid — treat as empty state
+    // fall through to legacy lookup
+  }
+  try {
+    const raw = await fs.readFile(LEGACY_FILE, "utf8");
+    const parsed = JSON.parse(raw);
+    if (parsed && typeof parsed === "object" && "m3uUrl" in parsed) {
+      // Persist into the new location next time we write.
+      return parsed as State;
+    }
+  } catch {
+    // ignore
   }
   return { m3uUrl: null, updatedAt: 0 };
 }

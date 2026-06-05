@@ -1,12 +1,14 @@
 "use client";
 
-import { use, useMemo } from "react";
+import { use, useMemo, useState } from "react";
 import Link from "next/link";
-import { ArrowLeft, Play, Tv } from "lucide-react";
+import { ArrowLeft, Play, Tv, Languages, Subtitles, Check } from "lucide-react";
 import { usePlaylistStore } from "@/lib/store";
 import { EmptyState } from "@/components/empty-state";
 import { ChannelThumbnail } from "@/components/channel-thumbnail";
 import type { Channel } from "@/lib/m3u-parser";
+
+type SeasonKey = number | "unknown";
 
 export default function ShowPage({
   params,
@@ -17,14 +19,16 @@ export default function ShowPage({
   const showSlug = decodeURIComponent(rawShow);
   const playlist = usePlaylistStore((s) => s.playlist);
   const history = usePlaylistStore((s) => s.watchHistory);
+  const globalAudio = usePlaylistStore((s) => s.preferredAudio);
+  const globalSubs = usePlaylistStore((s) => s.subtitleMode);
 
   const show = playlist?.shows[showSlug];
 
   const seasons = useMemo(() => {
-    if (!show) return [];
-    const map = new Map<number | "unknown", Channel[]>();
+    if (!show) return [] as Array<[SeasonKey, Channel[]]>;
+    const map = new Map<SeasonKey, Channel[]>();
     for (const ep of show.episodes) {
-      const key = ep.seriesInfo?.season ?? "unknown";
+      const key: SeasonKey = ep.seriesInfo?.season ?? "unknown";
       const arr = map.get(key) ?? [];
       arr.push(ep);
       map.set(key, arr);
@@ -36,12 +40,47 @@ export default function ShowPage({
     });
   }, [show]);
 
-  // Last watched episode for the "Continue" CTA — hooks must run unconditionally
   const lastWatched = useMemo(() => {
     if (!show) return null;
     const ids = new Set(show.episodes.map((e) => e.id));
     return history.find((h) => ids.has(h.channelId)) ?? null;
   }, [history, show]);
+
+  // Per-show local prefs — overrides the global settings just for this session.
+  const [audioPref, setAudioPref] = useState<"fr" | "original">(globalAudio);
+  const [subsPref, setSubsPref] = useState<"off" | "auto" | "always-fr">(
+    globalSubs
+  );
+
+  // Resync override when global changes (only when user hasn't touched local yet)
+  const [touched, setTouched] = useState(false);
+  const [lastGlobalAudio, setLastGlobalAudio] = useState(globalAudio);
+  const [lastGlobalSubs, setLastGlobalSubs] = useState(globalSubs);
+  if (
+    !touched &&
+    (lastGlobalAudio !== globalAudio || lastGlobalSubs !== globalSubs)
+  ) {
+    setLastGlobalAudio(globalAudio);
+    setLastGlobalSubs(globalSubs);
+    setAudioPref(globalAudio);
+    setSubsPref(globalSubs);
+  }
+
+  // Active season tab: "all" or a specific season key. Default to "all" — or
+  // jump to the last watched season for better UX.
+  const defaultTab: "all" | SeasonKey = useMemo(() => {
+    if (lastWatched && show) {
+      const ep = show.episodes.find((e) => e.id === lastWatched.channelId);
+      if (ep) return (ep.seriesInfo?.season ?? "unknown") as SeasonKey;
+    }
+    return seasons.length === 1 ? seasons[0][0] : "all";
+  }, [lastWatched, show, seasons]);
+  const [tab, setTab] = useState<"all" | SeasonKey>(defaultTab);
+  const [tabInitFor, setTabInitFor] = useState<string | null>(null);
+  if (tabInitFor !== showSlug) {
+    setTabInitFor(showSlug);
+    setTab(defaultTab);
+  }
 
   if (!playlist) {
     return (
@@ -71,10 +110,22 @@ export default function ShowPage({
     ? show.episodes.find((e) => e.id === lastWatched.channelId) ?? firstEpisode
     : firstEpisode;
 
+  function watchHref(id: string): string {
+    const params = new URLSearchParams();
+    if (audioPref !== globalAudio) params.set("audio", audioPref);
+    if (subsPref !== globalSubs) params.set("subs", subsPref);
+    const qs = params.toString();
+    return `/watch/${encodeURIComponent(id)}${qs ? `?${qs}` : ""}`;
+  }
+
+  // Episodes to render based on selected tab
+  const visibleSeasons =
+    tab === "all" ? seasons : seasons.filter(([key]) => key === tab);
+
   return (
     <div className="pb-20">
       {/* Hero */}
-      <section className="relative h-[42vh] min-h-[320px] w-full overflow-hidden">
+      <section className="relative h-[44vh] min-h-[340px] w-full overflow-hidden">
         <div className="absolute inset-0">
           {firstEpisode.logo ? (
             // eslint-disable-next-line @next/next/no-img-element
@@ -114,13 +165,11 @@ export default function ShowPage({
               <p className="text-muted mb-6 flex items-center gap-2 text-sm">
                 <Tv size={14} />
                 {show.episodes.length} épisode{show.episodes.length > 1 ? "s" : ""}
-                {seasons.length > 1
-                  ? ` · ${seasons.length} saisons`
-                  : ""}
+                {seasons.length > 1 ? ` · ${seasons.length} saisons` : ""}
               </p>
 
               <Link
-                href={`/watch/${encodeURIComponent(continueEpisode.id)}`}
+                href={watchHref(continueEpisode.id)}
                 className="inline-flex items-center gap-2 h-12 px-7 rounded-md bg-foreground text-background font-semibold hover:bg-foreground/85 transition-colors"
               >
                 <Play size={18} fill="currentColor" />
@@ -139,16 +188,112 @@ export default function ShowPage({
         </div>
       </section>
 
-      {/* Episodes by season */}
-      <div className="mx-auto max-w-[1600px] px-4 md:px-8 mt-8">
-        {seasons.map(([season, episodes]) => (
-          <section key={String(season)} className="mb-10">
-            <h2 className="text-xl font-bold mb-4">
-              {season === "unknown" ? "Épisodes" : `Saison ${season}`}
-              <span className="text-sm text-muted font-normal ml-2">
-                · {episodes.length} épisode{episodes.length > 1 ? "s" : ""}
+      {/* Audio + subtitle quick prefs for this show */}
+      <section className="mx-auto max-w-[1600px] px-4 md:px-8 mt-6 mb-2">
+        <div className="bg-card border border-border rounded-2xl p-4 md:p-5 flex flex-wrap items-center gap-4">
+          <div className="flex items-center gap-2 text-sm">
+            <Languages size={16} className="text-muted" />
+            <span className="font-semibold mr-1">Audio</span>
+            <PrefChips
+              options={[
+                { id: "fr", label: "🇫🇷 VF" },
+                { id: "original", label: "🎬 VO" },
+              ]}
+              value={audioPref}
+              onChange={(v) => {
+                setAudioPref(v as "fr" | "original");
+                setTouched(true);
+              }}
+            />
+          </div>
+
+          <div className="flex items-center gap-2 text-sm">
+            <Subtitles size={16} className="text-muted" />
+            <span className="font-semibold mr-1">Sous-titres</span>
+            <PrefChips
+              options={[
+                { id: "off", label: "Off" },
+                { id: "auto", label: "Auto" },
+                { id: "always-fr", label: "FR" },
+              ]}
+              value={subsPref}
+              onChange={(v) => {
+                setSubsPref(v as "off" | "auto" | "always-fr");
+                setTouched(true);
+              }}
+            />
+          </div>
+
+          <p className="text-xs text-muted ml-auto">
+            S&apos;applique aux épisodes ouverts depuis cette page
+          </p>
+        </div>
+      </section>
+
+      {/* Season tabs */}
+      {seasons.length > 1 ? (
+        <section className="mx-auto max-w-[1600px] px-4 md:px-8 mt-4">
+          <div className="flex items-center gap-2 overflow-x-auto no-scrollbar border-b border-border pb-3">
+            <button
+              type="button"
+              onClick={() => setTab("all")}
+              className={`shrink-0 h-9 px-4 rounded-full text-sm font-semibold transition-colors border ${
+                tab === "all"
+                  ? "bg-foreground text-background border-foreground"
+                  : "bg-card border-border text-muted hover:text-foreground"
+              }`}
+            >
+              Tout
+              <span
+                className={`ml-1.5 text-[10px] font-mono ${
+                  tab === "all" ? "opacity-70" : "opacity-50"
+                }`}
+              >
+                {show.episodes.length}
               </span>
-            </h2>
+            </button>
+            {seasons.map(([key, eps]) => {
+              const active = tab === key;
+              const label =
+                key === "unknown" ? "Épisodes" : `Saison ${key}`;
+              return (
+                <button
+                  key={String(key)}
+                  type="button"
+                  onClick={() => setTab(key)}
+                  className={`shrink-0 h-9 px-4 rounded-full text-sm font-semibold transition-colors border ${
+                    active
+                      ? "bg-foreground text-background border-foreground"
+                      : "bg-card border-border text-muted hover:text-foreground"
+                  }`}
+                >
+                  {label}
+                  <span
+                    className={`ml-1.5 text-[10px] font-mono ${
+                      active ? "opacity-70" : "opacity-50"
+                    }`}
+                  >
+                    {eps.length}
+                  </span>
+                </button>
+              );
+            })}
+          </div>
+        </section>
+      ) : null}
+
+      {/* Episodes list */}
+      <div className="mx-auto max-w-[1600px] px-4 md:px-8 mt-6">
+        {visibleSeasons.map(([season, episodes]) => (
+          <section key={String(season)} className="mb-10">
+            {tab === "all" && seasons.length > 1 ? (
+              <h2 className="text-xl font-bold mb-4 sticky top-16 bg-background/80 backdrop-blur-md py-2 z-10">
+                {season === "unknown" ? "Épisodes" : `Saison ${season}`}
+                <span className="text-sm text-muted font-normal ml-2">
+                  · {episodes.length}
+                </span>
+              </h2>
+            ) : null}
 
             <div className="space-y-2">
               {episodes.map((ep, idx) => {
@@ -156,7 +301,7 @@ export default function ShowPage({
                 return (
                   <Link
                     key={ep.id}
-                    href={`/watch/${encodeURIComponent(ep.id)}`}
+                    href={watchHref(ep.id)}
                     className="group flex items-center gap-4 p-3 rounded-lg border border-border bg-card hover:bg-card-hover transition-colors"
                   >
                     <div className="w-28 md:w-40 aspect-video rounded-md overflow-hidden shrink-0 border border-border">
@@ -170,14 +315,27 @@ export default function ShowPage({
                             ? `E${String(ep.seriesInfo.episode).padStart(2, "0")}`
                             : `#${idx + 1}`}
                         </span>
-                        <span className="truncate">{ep.name}</span>
+                        <span className="truncate">{ep.displayName}</span>
                       </p>
-                      <p className="text-xs text-muted mt-1">
+                      <p className="text-xs text-muted mt-1 flex items-center gap-1.5">
                         {ep.group}
-                        {watchedEntry ? (
-                          <span className="ml-2 text-[var(--accent)]">
-                            · Déjà vu
+                        {ep.langVariant ? (
+                          <span
+                            className={`text-[9px] font-bold px-1 py-0.5 rounded ${
+                              ep.langVariant === "VF"
+                                ? "bg-[var(--accent)]/30 text-[var(--accent)]"
+                                : ep.langVariant === "VOSTFR"
+                                  ? "bg-blue-500/30 text-blue-300"
+                                  : ep.langVariant === "MULTI"
+                                    ? "bg-purple-500/30 text-purple-300"
+                                    : "bg-amber-500/30 text-amber-300"
+                            }`}
+                          >
+                            {ep.langVariant}
                           </span>
+                        ) : null}
+                        {watchedEntry ? (
+                          <span className="text-[var(--accent)]">· Déjà vu</span>
                         ) : null}
                       </p>
                     </div>
@@ -192,6 +350,40 @@ export default function ShowPage({
           </section>
         ))}
       </div>
+    </div>
+  );
+}
+
+function PrefChips<T extends string>({
+  options,
+  value,
+  onChange,
+}: {
+  options: { id: T; label: string }[];
+  value: T;
+  onChange: (v: T) => void;
+}) {
+  return (
+    <div className="flex items-center gap-1.5">
+      {options.map((opt) => {
+        const active = value === opt.id;
+        return (
+          <button
+            key={opt.id}
+            type="button"
+            onClick={() => onChange(opt.id)}
+            className={`h-9 px-3 rounded-full text-xs font-semibold transition-colors border flex items-center gap-1.5 ${
+              active
+                ? "bg-[var(--accent)] border-[var(--accent)] text-white"
+                : "bg-background border-border text-muted hover:text-foreground"
+            }`}
+            aria-pressed={active}
+          >
+            {opt.label}
+            {active ? <Check size={12} /> : null}
+          </button>
+        );
+      })}
     </div>
   );
 }

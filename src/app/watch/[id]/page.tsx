@@ -2,7 +2,7 @@
 
 import { use, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import { Heart, SkipBack, SkipForward, RotateCw, Play, Home as HomeIcon, X } from "lucide-react";
 import { toast } from "sonner";
 import { Player } from "@/components/player";
@@ -29,6 +29,7 @@ export default function WatchPage({
   const { id: rawId } = use(params);
   const id = decodeURIComponent(rawId);
   const router = useRouter();
+  const searchParams = useSearchParams();
 
   const playlist = usePlaylistStore((s) => s.playlist);
   const m3uUrl = usePlaylistStore((s) => s.m3uUrl);
@@ -38,8 +39,19 @@ export default function WatchPage({
   const markWatched = usePlaylistStore((s) => s.markWatched);
   const history = usePlaylistStore((s) => s.watchHistory);
   const proxyStreams = usePlaylistStore((s) => s.proxyStreams);
-  const preferredAudio = usePlaylistStore((s) => s.preferredAudio);
-  const subtitleMode = usePlaylistStore((s) => s.subtitleMode);
+  const globalAudio = usePlaylistStore((s) => s.preferredAudio);
+  const globalSubs = usePlaylistStore((s) => s.subtitleMode);
+
+  // Query-string overrides set by /series/[show] so the user can pick VF/VOSTFR
+  // for a single show without changing global defaults.
+  const audioParam = searchParams.get("audio");
+  const subsParam = searchParams.get("subs");
+  const preferredAudio: "fr" | "original" =
+    audioParam === "fr" || audioParam === "original" ? audioParam : globalAudio;
+  const subtitleMode: "off" | "auto" | "always-fr" =
+    subsParam === "off" || subsParam === "auto" || subsParam === "always-fr"
+      ? subsParam
+      : globalSubs;
 
   const channel = useMemo(
     () => playlist?.channels.find((c) => c.id === id),

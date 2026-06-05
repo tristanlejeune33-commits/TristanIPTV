@@ -2,8 +2,8 @@ import type { MetadataRoute } from "next";
 
 export default function manifest(): MetadataRoute.Manifest {
   return {
-    name: "LE JEUNE IPTV",
-    short_name: "LE JEUNE",
+    name: "TRISTAN IPTV",
+    short_name: "TRISTAN",
     description: "Lecteur M3U / IPTV moderne — chaînes en direct, films, séries",
     start_url: "/",
     display: "standalone",

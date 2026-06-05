@@ -26,14 +26,9 @@ export function FullLoadingScreen({ progress }: { progress: string | null }) {
       >
         {/* Logo */}
         <div className="mb-8 flex items-center justify-center gap-3">
-          <div className="grid grid-cols-2 gap-1.5">
-            <span className="text-[var(--accent)] font-black text-3xl leading-none tracking-tighter">
-              LE
-            </span>
-            <span className="text-foreground font-black text-3xl leading-none tracking-tighter">
-              JEUNE
-            </span>
-          </div>
+          <span className="text-[var(--accent)] font-black text-4xl leading-none tracking-tighter">
+            TRISTAN
+          </span>
           <span className="text-xs text-muted uppercase tracking-widest font-mono">
             IPTV
           </span>

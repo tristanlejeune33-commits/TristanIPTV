@@ -17,12 +17,12 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "LE JEUNE IPTV — Chaînes, films et séries",
+  title: "TRISTAN IPTV — Chaînes, films et séries",
   description:
     "Lecteur M3U / IPTV moderne. Chaînes en direct, films, séries avec interface inspirée des grandes plateformes de streaming.",
-  applicationName: "LE JEUNE IPTV",
+  applicationName: "TRISTAN IPTV",
   manifest: "/manifest.webmanifest",
-  appleWebApp: { capable: true, statusBarStyle: "black-translucent", title: "LE JEUNE IPTV" },
+  appleWebApp: { capable: true, statusBarStyle: "black-translucent", title: "TRISTAN IPTV" },
 };
 
 export const viewport: Viewport = {
