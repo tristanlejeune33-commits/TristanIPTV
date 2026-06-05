@@ -185,11 +185,29 @@ function dedupeRepeats(s: string): string {
   return s.trim();
 }
 
-/** Strip standalone season markers ("S01", "Saison 1") from the show name. */
+/**
+ * Strip noise the show name shouldn't carry — season markers (S01, Saison 1),
+ * language tags (VF, VOSTFR, MULTI, VO), quality (4K, HEVC, 1080p, etc.) and
+ * country prefixes. Critical for grouping: a VF and VOSTFR copy of the same
+ * show must end up with the SAME show slug, otherwise the alternate-version
+ * switcher can't link them.
+ */
 function stripSeasonNoise(s: string): string {
   return s
+    // Country prefix "FR| ", "[EN] "
+    .replace(/^\s*[A-Z]{2,4}\s*[\|:\-]\s*/i, "")
+    .replace(/^\s*\[[A-Z]{2,4}\]\s*/i, "")
+    // Season markers
     .replace(/\b[Ss]\d{1,3}\b/g, "")
     .replace(/\b(?:saison|season)\s*\d{1,3}\b/gi, "")
+    // Language packaging tags — VOSTFR before VO to avoid eating it
+    .replace(/\b(VOSTFR?|VOST[\s\.\-]?FR|SUB[\s\-]?FR|SUBFR)\b/gi, "")
+    .replace(/\b(VFF?|VFQ|MULTI(?:LANG)?|MULTI[\s\-_]?AUDIO|MULTI[\s\-_]?VF)\b/gi, "")
+    .replace(/\b(VO|V\.O\.?)\b(?![a-zA-Z])/gi, "")
+    // Quality / codec markers
+    .replace(/\b(4K|UHD|HDR10?|HEVC|H[\.\s]?265|H[\.\s]?264|x265|x264|1080p|720p|480p|2160p|FHD|HDTV|WEB-?DL|WEBRip|BluRay|BD[Rr]ip|REMUX)\b/gi, "")
+    .replace(/\s+\b(SD|HD)\b/gi, "")
+    // Clean up separators left behind
     .replace(/[-–|·:]+/g, " ")
     .replace(/\s{2,}/g, " ")
     .trim();

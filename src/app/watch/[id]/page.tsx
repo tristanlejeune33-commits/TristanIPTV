@@ -114,21 +114,51 @@ export default function WatchPage({
     if (!channel || !playlist) return [];
 
     if (channel.seriesInfo) {
+      const targetSeason = channel.seriesInfo.season;
+      const targetEpisode = channel.seriesInfo.episode;
+      const targetShowName = channel.seriesInfo.show.toLowerCase().trim();
+
+      // 1. Same show (via showSlug — the clean strip should group VF/VOSTFR)
       const show = playlist.shows[channel.seriesInfo.showSlug];
-      if (!show) return [];
-      return show.episodes.filter(
-        (e) =>
-          e.id !== channel.id &&
-          e.seriesInfo?.season === channel.seriesInfo?.season &&
-          e.seriesInfo?.episode === channel.seriesInfo?.episode
-      );
+      const sameShowAlts = show
+        ? show.episodes.filter(
+            (e) =>
+              e.id !== channel.id &&
+              e.seriesInfo?.season === targetSeason &&
+              e.seriesInfo?.episode === targetEpisode
+          )
+        : [];
+
+      // 2. Fallback : search across ALL series episodes for a fuzzy show name
+      //    match. Catches providers that name VF/VOSTFR slightly differently
+      //    even after our stripping (e.g. trailing keyword we don't strip yet).
+      const fuzzyAlts = playlist.seriesEpisodes.filter((e) => {
+        if (e.id === channel.id) return false;
+        if (e.seriesInfo?.season !== targetSeason) return false;
+        if (e.seriesInfo?.episode !== targetEpisode) return false;
+        const otherShow = e.seriesInfo?.show.toLowerCase().trim() ?? "";
+        return (
+          otherShow === targetShowName ||
+          otherShow.includes(targetShowName) ||
+          targetShowName.includes(otherShow)
+        );
+      });
+
+      // Merge & dedupe
+      const byId = new Map<string, (typeof fuzzyAlts)[number]>();
+      for (const e of [...sameShowAlts, ...fuzzyAlts]) byId.set(e.id, e);
+      return Array.from(byId.values());
     }
 
     if (channel.type === "movie") {
       const base = channel.displayName.toLowerCase().trim();
       if (!base) return [];
       return playlist.movieChannels.filter(
-        (m) => m.id !== channel.id && m.displayName.toLowerCase().trim() === base
+        (m) =>
+          m.id !== channel.id &&
+          (m.displayName.toLowerCase().trim() === base ||
+            m.displayName.toLowerCase().includes(base) ||
+            base.includes(m.displayName.toLowerCase()))
       );
     }
 
@@ -346,23 +376,27 @@ export default function WatchPage({
   const topActions = (
     <div className="flex items-center gap-2 flex-wrap">
       {/* Language alternates — switch VF/VOSTFR/MULTI/VO instantly when the
-          provider ships them as separate playlist entries. */}
-      {langChips.length > 1 ? (
-        <div className="flex items-center gap-1 mr-1">
-          {langChips.map((chip) =>
-            chip.isCurrent ? (
+          provider ships them as separate playlist entries. Show the current
+          chip alone when at least one detected variant exists, so the user
+          always sees what version is playing. */}
+      {langChips.length > 1 || (langChips.length === 1 && channel.langVariant) ? (
+        <div className="flex items-center gap-1 mr-1 flex-wrap">
+          {langChips.map((chip) => {
+            const colorClass =
+              chip.label === "VF"
+                ? "bg-[var(--accent)] border-[var(--accent)] text-white"
+                : chip.label === "VOSTFR"
+                  ? "bg-blue-500 border-blue-500 text-white"
+                  : chip.label === "MULTI"
+                    ? "bg-purple-500 border-purple-500 text-white"
+                    : chip.label === "VO"
+                      ? "bg-amber-500 border-amber-500 text-white"
+                      : "bg-foreground border-foreground text-background";
+            return chip.isCurrent ? (
               <span
                 key={chip.id}
                 title="Version en cours"
-                className={`h-9 px-3 rounded-full text-xs font-bold border ${
-                  chip.label === "VF"
-                    ? "bg-[var(--accent)] border-[var(--accent)] text-white"
-                    : chip.label === "VOSTFR"
-                      ? "bg-blue-500 border-blue-500 text-white"
-                      : chip.label === "MULTI"
-                        ? "bg-purple-500 border-purple-500 text-white"
-                        : "bg-amber-500 border-amber-500 text-white"
-                }`}
+                className={`h-9 px-3 rounded-full text-xs font-bold border inline-flex items-center ${colorClass}`}
               >
                 {chip.label}
               </span>
@@ -371,12 +405,12 @@ export default function WatchPage({
                 key={chip.id}
                 href={`/watch/${encodeURIComponent(chip.id)}`}
                 title={`Passer en ${chip.label}`}
-                className="h-9 px-3 rounded-full text-xs font-semibold border border-white/20 bg-black/50 hover:bg-black/70 text-white transition-colors"
+                className="h-9 px-3 rounded-full text-xs font-semibold border border-white/20 bg-black/50 hover:bg-black/70 text-white transition-colors inline-flex items-center"
               >
                 {chip.label}
               </Link>
-            )
-          )}
+            );
+          })}
         </div>
       ) : null}
 
