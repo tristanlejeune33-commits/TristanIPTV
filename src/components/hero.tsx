@@ -40,7 +40,7 @@ export function Hero({ channel }: { channel: Channel }) {
               À l&apos;affiche · {channel.group}
             </p>
             <h1 className="text-4xl md:text-6xl font-black tracking-tight mb-4 drop-shadow-2xl">
-              {channel.name}
+              {channel.displayName}
             </h1>
             <p className="text-muted text-base md:text-lg mb-8 max-w-xl">
               {channel.country ? `Diffusion ${channel.country}. ` : "Diffusion en direct. "}

@@ -1,4 +1,4 @@
-import { classify, type ContentType, type LangVariant, type SeriesInfo } from "./classify";
+import { classify, cleanDisplayName, type ContentType, type LangVariant, type SeriesInfo } from "./classify";
 
 /**
  * M3U / M3U8 playlist parser tailored for IPTV playlists.
@@ -12,7 +12,10 @@ import { classify, type ContentType, type LangVariant, type SeriesInfo } from ".
 export type Channel = {
   /** Stable id derived from tvg-id or generated from URL */
   id: string;
+  /** Raw name as it appears in the M3U */
   name: string;
+  /** Cleaned title for display — strips country prefix, year, codec/quality, lang tags */
+  displayName: string;
   logo?: string;
   group: string;
   url: string;
@@ -142,6 +145,8 @@ export function parseM3U(text: string): ParsedPlaylist {
     channels.push({
       id,
       name,
+      displayName:
+        classification.type === "live" ? name : cleanDisplayName(name),
       logo: logo || undefined,
       group,
       url,
@@ -207,7 +212,9 @@ export function parseM3U(text: string): ParsedPlaylist {
   const shows: Record<string, ShowGroup> = {};
   for (const ep of seriesEpisodes) {
     const info = ep.seriesInfo;
-    const showName = info?.show ?? ep.name;
+    const showName = info?.show
+      ? cleanDisplayName(info.show)
+      : ep.displayName;
     const showSlug = info?.showSlug ?? slugify(ep.name);
     if (!shows[showSlug]) {
       shows[showSlug] = {

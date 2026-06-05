@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect } from "react";
+import { useEffect, useRef } from "react";
 import { usePlaylistStore } from "@/lib/store";
 import { parseM3U } from "@/lib/m3u-parser";
 
@@ -24,10 +24,33 @@ function nextTick(): Promise<void> {
  */
 export function PlaylistLoader() {
   const m3uUrl = usePlaylistStore((s) => s.m3uUrl);
+  const setM3uUrl = usePlaylistStore((s) => s.setM3uUrl);
   const setPlaylist = usePlaylistStore((s) => s.setPlaylist);
   const setLoading = usePlaylistStore((s) => s.setLoadingPlaylist);
   const setError = usePlaylistStore((s) => s.setPlaylistError);
   const setProgress = usePlaylistStore((s) => s.setLoadingProgress);
+
+  // On first mount, hydrate from the server-side store. The server value
+  // wins if local is empty — that's how a freshly-opened iPhone picks up
+  // the URL pasted on the PC. If both exist and disagree, we prefer the
+  // local one (the user might be editing).
+  const hydratedRef = useRef(false);
+  useEffect(() => {
+    if (hydratedRef.current) return;
+    hydratedRef.current = true;
+    (async () => {
+      try {
+        const res = await fetch("/api/m3u-url", { cache: "no-store" });
+        if (!res.ok) return;
+        const data = (await res.json()) as { m3uUrl: string | null };
+        if (data.m3uUrl && !usePlaylistStore.getState().m3uUrl) {
+          setM3uUrl(data.m3uUrl);
+        }
+      } catch {
+        // server persistence is best-effort
+      }
+    })();
+  }, [setM3uUrl]);
 
   useEffect(() => {
     if (!m3uUrl) {

@@ -6,9 +6,10 @@ import { Hero } from "@/components/hero";
 import { Rail } from "@/components/rail";
 import { ShowRail } from "@/components/show-rail";
 import { EmptyState } from "@/components/empty-state";
-import { SkeletonHero, SkeletonRail } from "@/components/skeleton";
+// Skeleton imports removed — full loading screen replaces the placeholder rails.
 import { TypeShortcuts } from "@/components/type-shortcuts";
 import { LazySection } from "@/components/lazy-section";
+import { FullLoadingScreen } from "@/components/full-loading-screen";
 
 const MAX_PER_RAIL = 24;
 
@@ -109,22 +110,7 @@ export default function Home() {
   }
 
   if (loading && !playlist) {
-    return (
-      <div className="pb-20">
-        <SkeletonHero />
-        <div className="-mt-24 relative z-10 space-y-4">
-          <SkeletonRail />
-          <SkeletonRail />
-          <SkeletonRail />
-        </div>
-        {progress ? (
-          <div className="fixed bottom-6 left-1/2 -translate-x-1/2 z-30 bg-card border border-border rounded-full px-5 py-3 shadow-2xl flex items-center gap-3 text-sm">
-            <div className="h-4 w-4 border-2 border-border border-t-[var(--accent)] rounded-full animate-spin" />
-            <span className="font-mono">{progress}</span>
-          </div>
-        ) : null}
-      </div>
-    );
+    return <FullLoadingScreen progress={progress} />;
   }
 
   if (error) {
@@ -179,6 +165,7 @@ export default function Home() {
               title="Derniers films ajoutés"
               channels={recentMovies}
               href="/movies"
+              posterStyle
             />
           </LazySection>
         ) : null}
@@ -210,6 +197,7 @@ export default function Home() {
               title="🇫🇷 Films français"
               channels={frenchMovies}
               href="/movies"
+              posterStyle
             />
           </LazySection>
         ) : null}

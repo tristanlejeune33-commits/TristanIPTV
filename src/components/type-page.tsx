@@ -27,12 +27,15 @@ export function TypePage({
   channels,
   emptyTitle,
   emptyDescription,
+  posterStyle,
 }: {
   title: string;
   subtitle?: string;
   channels: Channel[];
   emptyTitle: string;
   emptyDescription: string;
+  /** Render cards as posters (2:3). Auto for movies otherwise. */
+  posterStyle?: boolean;
 }) {
   const [query, setQuery] = useState("");
   const [variant, setVariant] = useState<LangVariant | "all">("all");
@@ -182,8 +185,14 @@ export function TypePage({
         <InfiniteGrid
           items={filtered}
           pageSize={60}
-          className="grid grid-cols-[repeat(auto-fill,minmax(220px,1fr))] gap-x-4 gap-y-8"
-          render={(ch) => <ChannelCard key={ch.id} channel={ch} />}
+          className={
+            posterStyle
+              ? "grid grid-cols-[repeat(auto-fill,minmax(160px,1fr))] gap-x-3 gap-y-6"
+              : "grid grid-cols-[repeat(auto-fill,minmax(220px,1fr))] gap-x-4 gap-y-8"
+          }
+          render={(ch) => (
+            <ChannelCard key={ch.id} channel={ch} posterStyle={posterStyle} />
+          )}
         />
       )}
     </div>

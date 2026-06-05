@@ -221,6 +221,54 @@ export function extractYear(name: string): number | null {
   return y;
 }
 
+/**
+ * Strip the noise that IPTV providers stuff into titles so they read like
+ * regular movie/series names. Removes country prefixes ("FR| "), year
+ * markers, language tags, quality / codec mentions, file extensions, and
+ * leftover separators.
+ *
+ * Falls back to the raw name if cleaning would empty the string.
+ */
+export function cleanDisplayName(raw: string): string {
+  let s = raw;
+
+  // 1. Country / group prefix:  "FR| ", "EN | ", "[FR] ", "[EN] "
+  s = s.replace(/^\s*[A-Z]{2,4}\s*[\|:\-]\s*/i, "");
+  s = s.replace(/^\s*\[[A-Z]{2,4}\]\s*/i, "");
+
+  // 2. File extension at the end
+  s = s.replace(/\.(mp4|mkv|avi|webm|mov|m4v|ts)\s*$/i, "");
+
+  // 3. Language packaging tags (whole-word so we don't gut titles like "Subway")
+  s = s.replace(/\s*\b(VOSTFR?|VOST[\s\.\-]?FR|SUB[\s\-]?FR|SUBFR)\b/gi, "");
+  s = s.replace(/\s*\b(VFF?|VFQ|MULTI(?:LANG)?|MULTI[\s\-_]?AUDIO|MULTI[\s\-_]?VF)\b/gi, "");
+  s = s.replace(/\s*\b(VO|V\.O\.?)\b(?![a-zA-Z])/gi, "");
+
+  // 4. Quality / codec markers (4K, HEVC, 1080p, etc.) — never legit in movie titles
+  s = s.replace(/\s*\b(4K|UHD|HDR10?|HEVC|H[\.\s]?265|H[\.\s]?264|x265|x264|1080p|720p|480p|2160p|FHD|HDTV|WEB-?DL|WEBRip|BluRay|BD[Rr]ip|REMUX)\b/gi, "");
+
+  // 5. Standalone SD/HD at the end or before a bracket
+  s = s.replace(/\s+\b(SD|HD)\b(?=\s*$|\s*[\(\[])/gi, "");
+
+  // 6. Year in parens / brackets — keep it via Channel.year, no need in title
+  s = s.replace(/\s*[\(\[](?:19|20)\d{2}[\)\]]\s*/g, " ");
+
+  // 7. Trailing year without parens ("Title 2024")
+  s = s.replace(/\s+(?:19|20)\d{2}\s*$/g, "");
+
+  // 8. Remaining empty brackets ()  [] {}
+  s = s.replace(/\s*[\(\[\{][\s\.\-]*[\)\]\}]\s*/g, " ");
+
+  // 9. Collapse leftover separators at the edges
+  s = s.replace(/^\s*[\-\|:·–]+\s*/, "");
+  s = s.replace(/\s*[\-\|:·–]+\s*$/, "");
+
+  // 10. Collapse multiple spaces
+  s = s.replace(/\s{2,}/g, " ").trim();
+
+  return s || raw;
+}
+
 export function classify(input: {
   name: string;
   group: string;

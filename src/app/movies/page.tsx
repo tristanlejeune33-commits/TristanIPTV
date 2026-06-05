@@ -26,6 +26,7 @@ export default function MoviesPage() {
       channels={playlist.movieChannels}
       emptyTitle="Aucun film"
       emptyDescription="Ta playlist ne contient pas de films détectables."
+      posterStyle
     />
   );
 }

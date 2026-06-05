@@ -259,7 +259,7 @@ export default function WatchPage({
     ? `E${String(channel.seriesInfo.episode).padStart(2, "0")}`
     : "";
 
-  const playerTitle = channel.name;
+  const playerTitle = channel.displayName;
   const playerSubtitle = showsSeriesNav
     ? `${channel.seriesInfo!.show} · ${seasonLabel}${epLabel} · ${channel.group}`
     : `${channel.group}${totalEpisodes > 0 ? ` · ${episodeNumber}/${totalEpisodes}` : ""}${
@@ -323,7 +323,7 @@ export default function WatchPage({
                 Reprendre la lecture ?
               </p>
               <h2 className="text-2xl md:text-3xl font-black mb-1 truncate">
-                {channel.name}
+                {channel.displayName}
               </h2>
               <p className="text-muted text-sm mb-6">
                 Tu t&apos;es arrêté à {formatTime(savedPosition)}.
@@ -404,7 +404,7 @@ export default function WatchPage({
                   <p className="text-[10px] uppercase tracking-widest text-[var(--accent)] font-bold mb-1">
                     Épisode suivant dans {autoplaySeconds}…
                   </p>
-                  <p className="text-sm font-semibold truncate">{nextEpisode.name}</p>
+                  <p className="text-sm font-semibold truncate">{nextEpisode.displayName}</p>
                   <p className="text-xs text-muted truncate">
                     {nextEpisode.seriesInfo?.season
                       ? `S${String(nextEpisode.seriesInfo.season).padStart(2, "0")}`

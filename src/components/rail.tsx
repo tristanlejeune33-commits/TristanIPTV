@@ -11,11 +11,13 @@ function RailImpl({
   channels,
   href,
   size = "md",
+  posterStyle,
 }: {
   title: string;
   channels: Channel[];
   href?: string;
   size?: "sm" | "md" | "lg";
+  posterStyle?: boolean;
 }) {
   const scrollerRef = useRef<HTMLDivElement>(null);
 
@@ -75,7 +77,12 @@ function RailImpl({
           className="flex gap-3 md:gap-4 px-4 md:px-8 pb-6 overflow-x-auto no-scrollbar scroll-smooth"
         >
           {channels.map((ch) => (
-            <ChannelCard key={ch.id} channel={ch} size={size} />
+            <ChannelCard
+              key={ch.id}
+              channel={ch}
+              size={size}
+              posterStyle={posterStyle}
+            />
           ))}
         </div>
       </div>

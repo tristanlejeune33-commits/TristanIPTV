@@ -33,12 +33,23 @@ export default function SettingsPage() {
     }
   }, [error]);
 
-  function save() {
+  async function save() {
     const trimmed = input.trim();
     if (!trimmed) return;
     setM3uUrl(trimmed);
+    // Best-effort server-side save so other devices on the same LAN
+    // (iPhone, autre PC) la récupèrent automatiquement au chargement.
+    try {
+      await fetch("/api/m3u-url", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ m3uUrl: trimmed }),
+      });
+    } catch {
+      // ignore — localStorage already has the value
+    }
     toast.success("Lien sauvegardé", {
-      description: "Chargement de la playlist en cours…",
+      description: "Visible depuis tes autres appareils sur le même WiFi",
     });
   }
 
@@ -50,9 +61,18 @@ export default function SettingsPage() {
     toast("Nouvelle tentative…");
   }
 
-  function clearAll() {
+  async function clearAll() {
     setM3uUrl(null);
     setInput("");
+    try {
+      await fetch("/api/m3u-url", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ m3uUrl: null }),
+      });
+    } catch {
+      // ignore
+    }
     toast("Lien supprimé");
   }
 

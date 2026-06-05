@@ -12,18 +12,31 @@ import { ChannelThumbnail } from "./channel-thumbnail";
 function ChannelCardImpl({
   channel,
   size = "md",
+  posterStyle: posterOverride,
 }: {
   channel: Channel;
   size?: "sm" | "md" | "lg";
+  /** Force poster (2:3) vs logo (16:9). When omitted, auto-detects from channel.type. */
+  posterStyle?: boolean;
 }) {
   const isFav = usePlaylistStore((s) => s.favorites.includes(channel.id));
   const toggleFav = usePlaylistStore((s) => s.toggleFavorite);
 
-  const dims = {
-    sm: "w-40 h-24",
-    md: "w-56 h-32",
-    lg: "w-72 h-40",
-  }[size];
+  // Auto: movies get poster art; live channels and series episodes keep the
+  // wider logo/thumbnail format.
+  const posterStyle = posterOverride ?? channel.type === "movie";
+
+  const dims = posterStyle
+    ? {
+        sm: "w-32 aspect-[2/3]",
+        md: "w-40 aspect-[2/3]",
+        lg: "w-48 aspect-[2/3]",
+      }[size]
+    : {
+        sm: "w-40 h-24",
+        md: "w-56 h-32",
+        lg: "w-72 h-40",
+      }[size];
 
   function onFavClick(e: React.MouseEvent) {
     e.preventDefault();
@@ -108,8 +121,8 @@ function ChannelCardImpl({
       </Link>
 
       <div className="mt-2 px-1">
-        <p className="text-sm font-medium truncate" title={channel.name}>
-          {channel.name}
+        <p className="text-sm font-medium truncate" title={channel.displayName}>
+          {channel.displayName}
         </p>
         <p className="text-xs text-muted truncate">{channel.group}</p>
       </div>
