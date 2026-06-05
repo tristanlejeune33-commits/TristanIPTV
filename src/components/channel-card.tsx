@@ -21,6 +21,13 @@ function ChannelCardImpl({
 }) {
   const isFav = usePlaylistStore((s) => s.favorites.includes(channel.id));
   const toggleFav = usePlaylistStore((s) => s.toggleFavorite);
+  const watchEntry = usePlaylistStore((s) =>
+    s.watchHistory.find((e) => e.channelId === channel.id)
+  );
+  const progressPct =
+    watchEntry?.position && watchEntry?.duration && watchEntry.duration > 0
+      ? Math.min(1, watchEntry.position / watchEntry.duration)
+      : null;
 
   // Auto: movies get poster art; live channels and series episodes keep the
   // wider logo/thumbnail format.
@@ -80,6 +87,17 @@ function ChannelCardImpl({
             </button>
           </div>
         </div>
+
+        {/* Resume progress bar (VOD only) */}
+        {progressPct !== null && progressPct > 0.02 ? (
+          <div className="absolute bottom-0 inset-x-0 h-1 bg-black/60">
+            <div
+              className="h-full bg-[var(--accent)]"
+              style={{ width: `${progressPct * 100}%` }}
+              aria-label={`Progression ${Math.round(progressPct * 100)}%`}
+            />
+          </div>
+        ) : null}
 
         {/* Always-visible small badges (FR / year / lang variant) */}
         <div className="absolute top-2 left-2 flex items-center gap-1.5 flex-wrap max-w-[calc(100%-1rem)]">

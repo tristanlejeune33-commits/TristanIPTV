@@ -139,7 +139,7 @@ export default function WatchPage({
     if (now - lastSaveRef.current < 5000) return;
     lastSaveRef.current = now;
     if (isVod && Number.isFinite(duration) && duration > 0) {
-      markWatched(channel.id, seconds);
+      markWatched(channel.id, seconds, duration);
     } else {
       markWatched(channel.id);
     }

@@ -9,6 +9,8 @@ export type WatchEntry = {
   lastWatchedAt: number;
   /** seconds — useful for VOD only */
   position?: number;
+  /** total seconds — captured at first play, used to draw progress bars */
+  duration?: number;
 };
 
 type PlaylistState = {
@@ -49,9 +51,14 @@ type PlaylistState = {
 
   // Continue watching (last 30, sorted by recency)
   watchHistory: WatchEntry[];
-  markWatched: (channelId: string, position?: number) => void;
+  markWatched: (channelId: string, position?: number, duration?: number) => void;
   removeFromHistory: (channelId: string) => void;
   clearHistory: () => void;
+
+  // Recent searches (last 8, sorted by recency)
+  recentSearches: string[];
+  addRecentSearch: (query: string) => void;
+  clearRecentSearches: () => void;
 };
 
 export const usePlaylistStore = create<PlaylistState>()(
@@ -91,15 +98,17 @@ export const usePlaylistStore = create<PlaylistState>()(
       isFavorite: (id) => get().favorites.includes(id),
 
       watchHistory: [],
-      markWatched: (channelId, position) =>
+      markWatched: (channelId, position, duration) =>
         set((s) => {
+          const prev = s.watchHistory.find((e) => e.channelId === channelId);
           const filtered = s.watchHistory.filter(
             (e) => e.channelId !== channelId
           );
           const next: WatchEntry = {
             channelId,
             lastWatchedAt: Date.now(),
-            position,
+            position: position ?? prev?.position,
+            duration: duration ?? prev?.duration,
           };
           return { watchHistory: [next, ...filtered].slice(0, 30) };
         }),
@@ -110,6 +119,16 @@ export const usePlaylistStore = create<PlaylistState>()(
           ),
         })),
       clearHistory: () => set({ watchHistory: [] }),
+
+      recentSearches: [],
+      addRecentSearch: (query) =>
+        set((s) => {
+          const q = query.trim();
+          if (!q) return s;
+          const next = [q, ...s.recentSearches.filter((r) => r !== q)].slice(0, 8);
+          return { recentSearches: next };
+        }),
+      clearRecentSearches: () => set({ recentSearches: [] }),
     }),
     {
       name: "netflix-iptv-store",
@@ -120,6 +139,7 @@ export const usePlaylistStore = create<PlaylistState>()(
         subtitleMode: s.subtitleMode,
         favorites: s.favorites,
         watchHistory: s.watchHistory,
+        recentSearches: s.recentSearches,
       }),
     }
   )

@@ -40,6 +40,7 @@ export function TypePage({
   const [query, setQuery] = useState("");
   const [variant, setVariant] = useState<LangVariant | "all">("all");
   const [group, setGroup] = useState<string>("all");
+  const [sortMode, setSortMode] = useState<"default" | "alpha" | "year">("default");
 
   const allGroups = useMemo(() => {
     const set = new Set<string>();
@@ -134,6 +135,36 @@ export function TypePage({
               ))}
             </select>
           ) : null}
+        </div>
+
+        <div className="flex items-center gap-1.5 flex-wrap">
+          <span className="text-[10px] uppercase tracking-widest text-muted mr-2">
+            Tri
+          </span>
+          {(
+            [
+              { id: "default", label: "Plus récents" },
+              { id: "year", label: "Année" },
+              { id: "alpha", label: "A-Z" },
+            ] as const
+          ).map((s) => {
+            const active = sortMode === s.id;
+            return (
+              <button
+                key={s.id}
+                type="button"
+                onClick={() => setSortMode(s.id)}
+                className={`h-9 px-3.5 rounded-full text-xs font-semibold transition-colors border ${
+                  active
+                    ? "bg-foreground border-foreground text-background"
+                    : "bg-card border-border text-muted hover:text-foreground"
+                }`}
+                aria-pressed={active}
+              >
+                {s.label}
+              </button>
+            );
+          })}
         </div>
 
         {/* Language variant segmented control */}

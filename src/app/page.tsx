@@ -97,6 +97,32 @@ export default function Home() {
     return playlist.groupsSorted.slice(0, 12);
   }, [playlist]);
 
+  // "Parce que vous avez regardé..." — find the most-watched groups in history,
+  // then surface channels from those groups the user hasn't watched yet.
+  const recommendations = useMemo(() => {
+    if (!playlist || history.length === 0) return [];
+    const groupCount = new Map<string, number>();
+    const watchedIds = new Set(history.map((h) => h.channelId));
+    for (const h of history) {
+      const ch = playlist.channels.find((c) => c.id === h.channelId);
+      if (!ch) continue;
+      groupCount.set(ch.group, (groupCount.get(ch.group) ?? 0) + 1);
+    }
+    const topGroupsByWatch = Array.from(groupCount.entries())
+      .sort((a, b) => b[1] - a[1])
+      .slice(0, 3)
+      .map(([g]) => g);
+
+    return topGroupsByWatch
+      .map((g) => ({
+        group: g,
+        channels: (playlist.groups[g] ?? [])
+          .filter((c) => !watchedIds.has(c.id))
+          .slice(0, MAX_PER_RAIL),
+      }))
+      .filter((r) => r.channels.length > 0);
+  }, [playlist, history]);
+
   if (!m3uUrl) {
     return (
       <EmptyState
@@ -157,6 +183,16 @@ export default function Home() {
         {favoriteChannels.length > 0 ? (
           <Rail title="Mes favoris" channels={favoriteChannels} href="/favorites" />
         ) : null}
+
+        {recommendations.map((rec) => (
+          <LazySection key={`reco-${rec.group}`}>
+            <Rail
+              title={`Parce que vous regardez ${rec.group}`}
+              channels={rec.channels}
+              href={`/category/${encodeURIComponent(rec.group)}`}
+            />
+          </LazySection>
+        ))}
 
         {/* Latest releases */}
         {recentMovies.length > 0 ? (
