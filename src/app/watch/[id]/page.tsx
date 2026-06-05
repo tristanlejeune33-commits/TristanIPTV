@@ -271,9 +271,19 @@ export default function WatchPage({
     ? `E${String(channel.seriesInfo.episode).padStart(2, "0")}`
     : "";
 
-  const playerTitle = channel.displayName;
+  // For series episodes, build a clean Netflix-style title: "Show · S01E01"
+  // and put the episode title (if parsed) in the subtitle. Otherwise fall back
+  // to the cleaned channel name.
+  const seCode = `${seasonLabel}${epLabel}`.trim();
+  const playerTitle = showsSeriesNav
+    ? seCode
+      ? `${channel.seriesInfo!.show} · ${seCode}`
+      : channel.seriesInfo!.show
+    : channel.displayName;
   const playerSubtitle = showsSeriesNav
-    ? `${channel.seriesInfo!.show} · ${seasonLabel}${epLabel} · ${channel.group}`
+    ? channel.seriesInfo!.episodeTitle
+      ? `${channel.seriesInfo!.episodeTitle} · ${channel.group}`
+      : channel.group
     : `${channel.group}${totalEpisodes > 0 ? ` · ${episodeNumber}/${totalEpisodes}` : ""}${
         channel.isFrench ? " · 🇫🇷" : ""
       }`;

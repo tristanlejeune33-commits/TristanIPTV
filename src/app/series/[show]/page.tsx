@@ -2,7 +2,7 @@
 
 import { use, useMemo, useState } from "react";
 import Link from "next/link";
-import { ArrowLeft, Play, Tv, Languages, Subtitles, Check } from "lucide-react";
+import { ArrowLeft, Play, Tv } from "lucide-react";
 import { usePlaylistStore } from "@/lib/store";
 import { EmptyState } from "@/components/empty-state";
 import { ChannelThumbnail } from "@/components/channel-thumbnail";
@@ -19,8 +19,6 @@ export default function ShowPage({
   const showSlug = decodeURIComponent(rawShow);
   const playlist = usePlaylistStore((s) => s.playlist);
   const history = usePlaylistStore((s) => s.watchHistory);
-  const globalAudio = usePlaylistStore((s) => s.preferredAudio);
-  const globalSubs = usePlaylistStore((s) => s.subtitleMode);
 
   const show = playlist?.shows[showSlug];
 
@@ -46,28 +44,7 @@ export default function ShowPage({
     return history.find((h) => ids.has(h.channelId)) ?? null;
   }, [history, show]);
 
-  // Per-show local prefs — overrides the global settings just for this session.
-  const [audioPref, setAudioPref] = useState<"fr" | "original">(globalAudio);
-  const [subsPref, setSubsPref] = useState<"off" | "auto" | "always-fr">(
-    globalSubs
-  );
-
-  // Resync override when global changes (only when user hasn't touched local yet)
-  const [touched, setTouched] = useState(false);
-  const [lastGlobalAudio, setLastGlobalAudio] = useState(globalAudio);
-  const [lastGlobalSubs, setLastGlobalSubs] = useState(globalSubs);
-  if (
-    !touched &&
-    (lastGlobalAudio !== globalAudio || lastGlobalSubs !== globalSubs)
-  ) {
-    setLastGlobalAudio(globalAudio);
-    setLastGlobalSubs(globalSubs);
-    setAudioPref(globalAudio);
-    setSubsPref(globalSubs);
-  }
-
-  // Active season tab: "all" or a specific season key. Default to "all" — or
-  // jump to the last watched season for better UX.
+  // Active season tab: default to last-watched season, or "all", or the only season
   const defaultTab: "all" | SeasonKey = useMemo(() => {
     if (lastWatched && show) {
       const ep = show.episodes.find((e) => e.id === lastWatched.channelId);
@@ -109,14 +86,6 @@ export default function ShowPage({
   const continueEpisode = lastWatched
     ? show.episodes.find((e) => e.id === lastWatched.channelId) ?? firstEpisode
     : firstEpisode;
-
-  function watchHref(id: string): string {
-    const params = new URLSearchParams();
-    if (audioPref !== globalAudio) params.set("audio", audioPref);
-    if (subsPref !== globalSubs) params.set("subs", subsPref);
-    const qs = params.toString();
-    return `/watch/${encodeURIComponent(id)}${qs ? `?${qs}` : ""}`;
-  }
 
   // Episodes to render based on selected tab
   const visibleSeasons =
@@ -169,7 +138,7 @@ export default function ShowPage({
               </p>
 
               <Link
-                href={watchHref(continueEpisode.id)}
+                href={`/watch/${encodeURIComponent(continueEpisode.id)}`}
                 className="inline-flex items-center gap-2 h-12 px-7 rounded-md bg-foreground text-background font-semibold hover:bg-foreground/85 transition-colors"
               >
                 <Play size={18} fill="currentColor" />
@@ -188,51 +157,9 @@ export default function ShowPage({
         </div>
       </section>
 
-      {/* Audio + subtitle quick prefs for this show */}
-      <section className="mx-auto max-w-[1600px] px-4 md:px-8 mt-6 mb-2">
-        <div className="bg-card border border-border rounded-2xl p-4 md:p-5 flex flex-wrap items-center gap-4">
-          <div className="flex items-center gap-2 text-sm">
-            <Languages size={16} className="text-muted" />
-            <span className="font-semibold mr-1">Audio</span>
-            <PrefChips
-              options={[
-                { id: "fr", label: "🇫🇷 VF" },
-                { id: "original", label: "🎬 VO" },
-              ]}
-              value={audioPref}
-              onChange={(v) => {
-                setAudioPref(v as "fr" | "original");
-                setTouched(true);
-              }}
-            />
-          </div>
-
-          <div className="flex items-center gap-2 text-sm">
-            <Subtitles size={16} className="text-muted" />
-            <span className="font-semibold mr-1">Sous-titres</span>
-            <PrefChips
-              options={[
-                { id: "off", label: "Off" },
-                { id: "auto", label: "Auto" },
-                { id: "always-fr", label: "FR" },
-              ]}
-              value={subsPref}
-              onChange={(v) => {
-                setSubsPref(v as "off" | "auto" | "always-fr");
-                setTouched(true);
-              }}
-            />
-          </div>
-
-          <p className="text-xs text-muted ml-auto">
-            S&apos;applique aux épisodes ouverts depuis cette page
-          </p>
-        </div>
-      </section>
-
       {/* Season tabs */}
       {seasons.length > 1 ? (
-        <section className="mx-auto max-w-[1600px] px-4 md:px-8 mt-4">
+        <section className="mx-auto max-w-[1600px] px-4 md:px-8 mt-6">
           <div className="flex items-center gap-2 overflow-x-auto no-scrollbar border-b border-border pb-3">
             <button
               type="button"
@@ -298,10 +225,12 @@ export default function ShowPage({
             <div className="space-y-2">
               {episodes.map((ep, idx) => {
                 const watchedEntry = history.find((h) => h.channelId === ep.id);
+                const epTitle =
+                  ep.seriesInfo?.episodeTitle ?? ep.displayName;
                 return (
                   <Link
                     key={ep.id}
-                    href={watchHref(ep.id)}
+                    href={`/watch/${encodeURIComponent(ep.id)}`}
                     className="group flex items-center gap-4 p-3 rounded-lg border border-border bg-card hover:bg-card-hover transition-colors"
                   >
                     <div className="w-28 md:w-40 aspect-video rounded-md overflow-hidden shrink-0 border border-border">
@@ -315,9 +244,9 @@ export default function ShowPage({
                             ? `E${String(ep.seriesInfo.episode).padStart(2, "0")}`
                             : `#${idx + 1}`}
                         </span>
-                        <span className="truncate">{ep.displayName}</span>
+                        <span className="truncate">{epTitle}</span>
                       </p>
-                      <p className="text-xs text-muted mt-1 flex items-center gap-1.5">
+                      <p className="text-xs text-muted mt-1 flex items-center gap-1.5 flex-wrap">
                         {ep.group}
                         {ep.langVariant ? (
                           <span
@@ -350,40 +279,6 @@ export default function ShowPage({
           </section>
         ))}
       </div>
-    </div>
-  );
-}
-
-function PrefChips<T extends string>({
-  options,
-  value,
-  onChange,
-}: {
-  options: { id: T; label: string }[];
-  value: T;
-  onChange: (v: T) => void;
-}) {
-  return (
-    <div className="flex items-center gap-1.5">
-      {options.map((opt) => {
-        const active = value === opt.id;
-        return (
-          <button
-            key={opt.id}
-            type="button"
-            onClick={() => onChange(opt.id)}
-            className={`h-9 px-3 rounded-full text-xs font-semibold transition-colors border flex items-center gap-1.5 ${
-              active
-                ? "bg-[var(--accent)] border-[var(--accent)] text-white"
-                : "bg-background border-border text-muted hover:text-foreground"
-            }`}
-            aria-pressed={active}
-          >
-            {opt.label}
-            {active ? <Check size={12} /> : null}
-          </button>
-        );
-      })}
     </div>
   );
 }

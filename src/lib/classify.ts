@@ -16,6 +16,8 @@ export type SeriesInfo = {
   showSlug: string;
   season?: number;
   episode?: number;
+  /** Episode title parsed from the part AFTER the season/episode marker */
+  episodeTitle?: string;
 };
 
 export type LangVariant = "VF" | "VOSTFR" | "VO" | "MULTI";
@@ -137,16 +139,14 @@ export function detectType(input: {
 
 // --- Series episode parsing --------------------------------------------------
 
-const SERIES_PATTERNS: { re: RegExp; show: number; season?: number; episode?: number }[] = [
-  // "Show Name S01 E05" / "Show Name S01E05" / "Show Name s01.e05"
-  { re: /^(.*?)\s*[-–|·]?\s*[Ss](\d{1,3})\s*[\.xEe]\s*(\d{1,3})\b/, show: 1, season: 2, episode: 3 },
-  // "Show Name 1x05"
-  { re: /^(.*?)\s*[-–|·]?\s*(\d{1,2})\s*x\s*(\d{1,3})\b/, show: 1, season: 2, episode: 3 },
-  // "Show Name - Saison 1 Episode 5" / "Season 1 Episode 5"
-  { re: /^(.*?)\s*[-–|·]?\s*(?:saison|season)\s*(\d{1,3})\s*[-–|·]?\s*(?:episode|épisode|ep)\s*(\d{1,3})\b/i, show: 1, season: 2, episode: 3 },
-  // "Show Name - Episode 5" (no season)
-  { re: /^(.*?)\s*[-–|·]\s*(?:episode|épisode|ep)\s*(\d{1,3})\b/i, show: 1, episode: 2 },
-];
+// One unified regex with three alternatives. Anchored on a word boundary so
+// the engine finds the EARLIEST marker, not just the first that fits a
+// `^.*?` lazy pattern (which was matching the LAST season/episode in titles
+// where the show name itself contained season text like "Jujutsu Kaisen S01").
+const SERIES_MARKER_RE =
+  /\b[Ss](\d{1,3})\s*[\.xEe]\s*(\d{1,3})\b|\b(\d{1,2})\s*x\s*(\d{1,3})\b|\b(?:saison|season)\s*(\d{1,3})\s*[-–|·]?\s*(?:episode|épisode|ep)\s*(\d{1,3})\b/i;
+
+const EP_ONLY_RE = /[-–|·]\s*(?:episode|épisode|ep)\s*(\d{1,3})\b/i;
 
 function slugify(input: string): string {
   return input
@@ -158,23 +158,108 @@ function slugify(input: string): string {
     .slice(0, 80) || "show";
 }
 
+/**
+ * Collapse "Foo Bar Foo Bar" → "Foo Bar". IPTV providers very often duplicate
+ * the show name on each side of a season marker, e.g.
+ * "Jujutsu Kaisen S01 Jujutsu Kaisen" → "Jujutsu Kaisen".
+ */
+function dedupeRepeats(s: string): string {
+  const tokens = s.trim().split(/\s+/).filter(Boolean);
+  const n = tokens.length;
+  if (n < 2) return s.trim();
+  // Try halves first (most common case)
+  if (n % 2 === 0) {
+    const half = n / 2;
+    const a = tokens.slice(0, half).join(" ").toLowerCase();
+    const b = tokens.slice(half).join(" ").toLowerCase();
+    if (a === b) return tokens.slice(0, half).join(" ");
+  }
+  // Try thirds too — sometimes "Foo Foo Foo"
+  if (n % 3 === 0) {
+    const third = n / 3;
+    const a = tokens.slice(0, third).join(" ").toLowerCase();
+    const b = tokens.slice(third, third * 2).join(" ").toLowerCase();
+    const c = tokens.slice(third * 2).join(" ").toLowerCase();
+    if (a === b && b === c) return tokens.slice(0, third).join(" ");
+  }
+  return s.trim();
+}
+
+/** Strip standalone season markers ("S01", "Saison 1") from the show name. */
+function stripSeasonNoise(s: string): string {
+  return s
+    .replace(/\b[Ss]\d{1,3}\b/g, "")
+    .replace(/\b(?:saison|season)\s*\d{1,3}\b/gi, "")
+    .replace(/[-–|·:]+/g, " ")
+    .replace(/\s{2,}/g, " ")
+    .trim();
+}
+
 export function extractSeriesInfo(name: string): SeriesInfo | null {
-  for (const p of SERIES_PATTERNS) {
-    const m = name.match(p.re);
-    if (m) {
-      const rawShow = (m[p.show] ?? "").trim().replace(/[-–|·]+$/, "").trim();
-      if (!rawShow) continue;
-      const season = p.season ? parseInt(m[p.season] ?? "", 10) : undefined;
-      const episode = p.episode ? parseInt(m[p.episode] ?? "", 10) : undefined;
-      return {
-        show: rawShow,
-        showSlug: slugify(rawShow),
-        season: Number.isFinite(season) ? season : undefined,
-        episode: Number.isFinite(episode) ? episode : undefined,
-      };
+  const m = name.match(SERIES_MARKER_RE);
+  let season: number | undefined;
+  let episode: number | undefined;
+  let markerIndex: number | undefined;
+  let markerLength = 0;
+
+  if (m && m.index !== undefined) {
+    markerIndex = m.index;
+    markerLength = m[0].length;
+    if (m[1] !== undefined) {
+      season = parseInt(m[1], 10);
+      episode = parseInt(m[2], 10);
+    } else if (m[3] !== undefined) {
+      season = parseInt(m[3], 10);
+      episode = parseInt(m[4], 10);
+    } else if (m[5] !== undefined) {
+      season = parseInt(m[5], 10);
+      episode = parseInt(m[6], 10);
+    }
+  } else {
+    const epOnly = name.match(EP_ONLY_RE);
+    if (epOnly && epOnly.index !== undefined) {
+      markerIndex = epOnly.index;
+      markerLength = epOnly[0].length;
+      episode = parseInt(epOnly[1], 10);
     }
   }
-  return null;
+
+  if (markerIndex === undefined) return null;
+
+  // Show name = everything BEFORE the earliest marker
+  const beforeRaw = name.slice(0, markerIndex);
+  const before = stripSeasonNoise(beforeRaw)
+    .replace(/[-–|·:]+\s*$/, "")
+    .trim();
+  const show = dedupeRepeats(before);
+  if (!show) return null;
+
+  // Episode title = part AFTER the marker, cleaned
+  const afterRaw = name.slice(markerIndex + markerLength);
+  let episodeTitle = afterRaw
+    .replace(/^[\s\-–|·:]+/, "")
+    .replace(/[-–|·:]+\s*$/, "")
+    .trim();
+  // If the episode title repeats the show name, drop it (avoids "Jujutsu Kaisen Jujutsu Kaisen")
+  if (
+    episodeTitle &&
+    episodeTitle.toLowerCase().startsWith(show.toLowerCase())
+  ) {
+    episodeTitle = episodeTitle
+      .slice(show.length)
+      .replace(/^[\s\-–|·:]+/, "")
+      .trim();
+  }
+
+  return {
+    show,
+    showSlug: slugify(show),
+    season:
+      season !== undefined && Number.isFinite(season) ? season : undefined,
+    episode:
+      episode !== undefined && Number.isFinite(episode) ? episode : undefined,
+    episodeTitle: episodeTitle || undefined,
+  };
 }
 
 // --- Combined ---------------------------------------------------------------
