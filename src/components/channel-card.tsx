@@ -68,11 +68,35 @@ function ChannelCardImpl({
           </div>
         </div>
 
-        {/* Always-visible small badges (FR / year) */}
-        <div className="absolute top-2 left-2 flex items-center gap-1.5">
-          {channel.isFrench ? (
+        {/* Always-visible small badges (FR / year / lang variant) */}
+        <div className="absolute top-2 left-2 flex items-center gap-1.5 flex-wrap max-w-[calc(100%-1rem)]">
+          {channel.isFrench && !channel.langVariant ? (
             <span className="text-[10px] font-bold bg-[var(--accent)] text-white px-1.5 py-0.5 rounded">
               FR
+            </span>
+          ) : null}
+          {channel.langVariant ? (
+            <span
+              className={`text-[10px] font-bold px-1.5 py-0.5 rounded ${
+                channel.langVariant === "VF"
+                  ? "bg-[var(--accent)] text-white"
+                  : channel.langVariant === "VOSTFR"
+                    ? "bg-blue-500 text-white"
+                    : channel.langVariant === "MULTI"
+                      ? "bg-purple-500 text-white"
+                      : "bg-amber-500 text-white"
+              }`}
+              title={
+                channel.langVariant === "VF"
+                  ? "Version Française"
+                  : channel.langVariant === "VOSTFR"
+                    ? "Version Originale Sous-Titrée Français"
+                    : channel.langVariant === "MULTI"
+                      ? "Multi-langue"
+                      : "Version Originale"
+              }
+            >
+              {channel.langVariant}
             </span>
           ) : null}
           {channel.year ? (

@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
-import { Loader2, Save, Trash2, ExternalLink, Shield } from "lucide-react";
+import { Loader2, Save, Trash2, ExternalLink, Shield, Subtitles, Languages } from "lucide-react";
 import { toast } from "sonner";
 import { usePlaylistStore } from "@/lib/store";
 
@@ -19,6 +19,10 @@ export default function SettingsPage() {
   const proxyStreams = usePlaylistStore((s) => s.proxyStreams);
   const setProxyStreams = usePlaylistStore((s) => s.setProxyStreams);
   const progress = usePlaylistStore((s) => s.loadingProgress);
+  const preferredAudio = usePlaylistStore((s) => s.preferredAudio);
+  const setPreferredAudio = usePlaylistStore((s) => s.setPreferredAudio);
+  const subtitleMode = usePlaylistStore((s) => s.subtitleMode);
+  const setSubtitleMode = usePlaylistStore((s) => s.setSubtitleMode);
 
   const [input, setInput] = useState(currentUrl ?? "");
 
@@ -186,6 +190,76 @@ export default function SettingsPage() {
       </section>
 
       <section className="bg-card border border-border rounded-2xl p-6 md:p-8 mb-8">
+        <h2 className="text-lg font-semibold mb-2 flex items-center gap-2">
+          <Languages size={18} /> Langue par défaut (films &amp; séries)
+        </h2>
+        <p className="text-sm text-muted mb-4">
+          Quand un film ou un épisode propose plusieurs pistes audio, le
+          player sélectionne celle-ci automatiquement.
+        </p>
+        <div className="grid grid-cols-2 gap-3">
+          <RadioCard
+            label="🇫🇷 Français (VF)"
+            description="Doublage français si dispo"
+            active={preferredAudio === "fr"}
+            onClick={() => {
+              setPreferredAudio("fr");
+              toast("Audio par défaut : Français");
+            }}
+          />
+          <RadioCard
+            label="🎬 Version originale"
+            description="Garde la langue d'origine"
+            active={preferredAudio === "original"}
+            onClick={() => {
+              setPreferredAudio("original");
+              toast("Audio par défaut : Version originale");
+            }}
+          />
+        </div>
+      </section>
+
+      <section className="bg-card border border-border rounded-2xl p-6 md:p-8 mb-8">
+        <h2 className="text-lg font-semibold mb-2 flex items-center gap-2">
+          <Subtitles size={18} /> Sous-titres par défaut
+        </h2>
+        <p className="text-sm text-muted mb-4">
+          Comportement automatique des sous-titres à l&apos;ouverture d&apos;un film
+          ou épisode.
+        </p>
+        <div className="grid md:grid-cols-3 gap-3">
+          <RadioCard
+            label="Désactivés"
+            description="Jamais de sous-titres"
+            active={subtitleMode === "off"}
+            onClick={() => {
+              setSubtitleMode("off");
+              toast("Sous-titres : désactivés");
+            }}
+          />
+          <RadioCard
+            label="Auto (VOSTFR)"
+            description="Activés uniquement pour les chaînes VOSTFR"
+            active={subtitleMode === "auto"}
+            onClick={() => {
+              setSubtitleMode("auto");
+              toast("Sous-titres : auto (VOSTFR)");
+            }}
+            recommended
+          />
+          <RadioCard
+            label="Toujours en français"
+            description="Active la piste FR si dispo, partout"
+            active={subtitleMode === "always-fr"}
+            onClick={() => {
+              setSubtitleMode("always-fr");
+              toast("Sous-titres : toujours en français");
+            }}
+          />
+        </div>
+      </section>
+
+      <section className="bg-card border border-border rounded-2xl p-6 md:p-8 mb-8">
         <h2 className="text-lg font-semibold mb-4">Données locales</h2>
         <div className="grid grid-cols-2 gap-4 mb-6">
           <Stat label="Favoris" value={favorites.length} />
@@ -239,6 +313,43 @@ export default function SettingsPage() {
         </ul>
       </section>
     </div>
+  );
+}
+
+function RadioCard({
+  label,
+  description,
+  active,
+  onClick,
+  recommended,
+}: {
+  label: string;
+  description: string;
+  active: boolean;
+  onClick: () => void;
+  recommended?: boolean;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className={`text-left p-4 rounded-lg border transition-all ${
+        active
+          ? "border-[var(--accent)] bg-[var(--accent)]/10"
+          : "border-border bg-background hover:bg-card-hover"
+      }`}
+      aria-pressed={active}
+    >
+      <div className="flex items-center justify-between mb-1">
+        <span className="text-sm font-semibold">{label}</span>
+        {recommended ? (
+          <span className="text-[10px] uppercase tracking-widest text-[var(--accent)] font-bold">
+            Reco
+          </span>
+        ) : null}
+      </div>
+      <p className="text-xs text-muted">{description}</p>
+    </button>
   );
 }
 

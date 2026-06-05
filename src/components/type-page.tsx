@@ -5,12 +5,21 @@ import { Search } from "lucide-react";
 import { ChannelCard } from "./channel-card";
 import { InfiniteGrid } from "./infinite-grid";
 import type { Channel } from "@/lib/m3u-parser";
+import type { LangVariant } from "@/lib/classify";
 import { EmptyState } from "./empty-state";
+
+const VARIANTS: { id: LangVariant | "all"; label: string }[] = [
+  { id: "all", label: "Tous" },
+  { id: "VF", label: "VF" },
+  { id: "VOSTFR", label: "VOSTFR" },
+  { id: "MULTI", label: "MULTI" },
+  { id: "VO", label: "VO" },
+];
 
 /**
  * Generic page layout for content-type pages (/live, /movies).
- * - French-first sort, FR filter toggle, group filter, text search,
- *   infinite scroll for large catalogs.
+ * - French-first sort, language-variant filter (VF/VOSTFR/...),
+ *   group filter, text search, infinite scroll.
  */
 export function TypePage({
   title,
@@ -26,13 +35,21 @@ export function TypePage({
   emptyDescription: string;
 }) {
   const [query, setQuery] = useState("");
-  const [frOnly, setFrOnly] = useState(false);
+  const [variant, setVariant] = useState<LangVariant | "all">("all");
   const [group, setGroup] = useState<string>("all");
 
   const allGroups = useMemo(() => {
     const set = new Set<string>();
     for (const c of channels) set.add(c.group);
     return Array.from(set).sort((a, b) => a.localeCompare(b, "fr"));
+  }, [channels]);
+
+  const variantCounts = useMemo(() => {
+    const counts: Record<string, number> = { all: channels.length };
+    for (const v of ["VF", "VOSTFR", "MULTI", "VO"] as const) {
+      counts[v] = channels.filter((c) => c.langVariant === v).length;
+    }
+    return counts;
   }, [channels]);
 
   const frenchCount = useMemo(
@@ -42,7 +59,7 @@ export function TypePage({
 
   const filtered = useMemo(() => {
     let list = channels;
-    if (frOnly) list = list.filter((c) => c.isFrench);
+    if (variant !== "all") list = list.filter((c) => c.langVariant === variant);
     if (group !== "all") list = list.filter((c) => c.group === group);
     const q = query.trim().toLowerCase();
     if (q) {
@@ -51,10 +68,8 @@ export function TypePage({
         tokens.every((t) => `${c.name} ${c.group}`.toLowerCase().includes(t))
       );
     }
-    // List is already sorted upstream (FR-first, year desc for VOD).
-    // Don't resort — preserve "latest releases first" order.
     return list;
-  }, [channels, frOnly, group, query]);
+  }, [channels, variant, group, query]);
 
   if (channels.length === 0) {
     return (
@@ -87,47 +102,78 @@ export function TypePage({
         </p>
       </header>
 
-      <div className="flex flex-wrap items-center gap-3 mb-8 sticky top-16 md:top-16 z-20 bg-background/80 backdrop-blur-md py-3 -mx-2 px-2 rounded-2xl">
-        <div className="relative flex-1 min-w-[220px] max-w-md">
-          <Search
-            size={16}
-            className="absolute left-3 top-1/2 -translate-y-1/2 text-muted"
-          />
-          <input
-            value={query}
-            onChange={(e) => setQuery(e.target.value)}
-            placeholder="Rechercher…"
-            className="w-full bg-card border border-border rounded-full h-11 pl-9 pr-4 text-sm placeholder:text-muted focus:outline-none focus:border-foreground/40"
-          />
+      <div className="sticky top-16 z-20 bg-background/85 backdrop-blur-md py-3 -mx-2 px-2 rounded-2xl mb-8 space-y-3">
+        <div className="flex flex-wrap items-center gap-3">
+          <div className="relative flex-1 min-w-[220px] max-w-md">
+            <Search
+              size={16}
+              className="absolute left-3 top-1/2 -translate-y-1/2 text-muted"
+            />
+            <input
+              value={query}
+              onChange={(e) => setQuery(e.target.value)}
+              placeholder="Rechercher…"
+              className="w-full bg-card border border-border rounded-full h-11 pl-9 pr-4 text-sm placeholder:text-muted focus:outline-none focus:border-foreground/40"
+            />
+          </div>
+
+          {allGroups.length > 1 ? (
+            <select
+              value={group}
+              onChange={(e) => setGroup(e.target.value)}
+              className="h-11 px-3 rounded-full bg-card border border-border text-sm focus:outline-none focus:border-foreground/40 max-w-[240px] truncate"
+            >
+              <option value="all">Toutes les catégories ({allGroups.length})</option>
+              {allGroups.map((g) => (
+                <option key={g} value={g}>
+                  {g}
+                </option>
+              ))}
+            </select>
+          ) : null}
         </div>
 
-        <button
-          type="button"
-          onClick={() => setFrOnly((v) => !v)}
-          className={`h-11 px-4 rounded-full text-sm font-semibold transition-colors border ${
-            frOnly
-              ? "bg-[var(--accent)] border-[var(--accent)] text-white"
-              : "bg-card border-border text-muted hover:text-foreground"
-          }`}
-          aria-pressed={frOnly}
-        >
-          🇫🇷 Français
-        </button>
-
-        {allGroups.length > 1 ? (
-          <select
-            value={group}
-            onChange={(e) => setGroup(e.target.value)}
-            className="h-11 px-3 rounded-full bg-card border border-border text-sm focus:outline-none focus:border-foreground/40 max-w-[240px] truncate"
-          >
-            <option value="all">Toutes les catégories ({allGroups.length})</option>
-            {allGroups.map((g) => (
-              <option key={g} value={g}>
-                {g}
-              </option>
-            ))}
-          </select>
-        ) : null}
+        {/* Language variant segmented control */}
+        <div className="flex items-center gap-1.5 flex-wrap">
+          <span className="text-[10px] uppercase tracking-widest text-muted mr-2">
+            Langue
+          </span>
+          {VARIANTS.map((v) => {
+            const count = variantCounts[v.id] ?? 0;
+            if (v.id !== "all" && count === 0) return null;
+            const active = variant === v.id;
+            return (
+              <button
+                key={v.id}
+                type="button"
+                onClick={() => setVariant(v.id)}
+                className={`h-9 px-3.5 rounded-full text-xs font-semibold transition-colors border flex items-center gap-1.5 ${
+                  active
+                    ? v.id === "VF"
+                      ? "bg-[var(--accent)] border-[var(--accent)] text-white"
+                      : v.id === "VOSTFR"
+                        ? "bg-blue-500 border-blue-500 text-white"
+                        : v.id === "MULTI"
+                          ? "bg-purple-500 border-purple-500 text-white"
+                          : v.id === "VO"
+                            ? "bg-amber-500 border-amber-500 text-white"
+                            : "bg-foreground border-foreground text-background"
+                    : "bg-card border-border text-muted hover:text-foreground"
+                }`}
+                aria-pressed={active}
+              >
+                {v.label}
+                <span
+                  className={`font-mono text-[10px] ${
+                    active ? "opacity-80" : "opacity-60"
+                  }`}
+                >
+                  {count}
+                </span>
+              </button>
+            );
+          })}
+        </div>
       </div>
 
       {filtered.length === 0 ? (

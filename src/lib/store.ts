@@ -20,6 +20,14 @@ type PlaylistState = {
   proxyStreams: boolean;
   setProxyStreams: (v: boolean) => void;
 
+  /** Preferred audio language for VOD ("fr" picks French dub, "original" keeps source). */
+  preferredAudio: "fr" | "original";
+  setPreferredAudio: (v: "fr" | "original") => void;
+
+  /** Default subtitle behavior: "off", "auto" (on for VOSTFR), "always-fr". */
+  subtitleMode: "off" | "auto" | "always-fr";
+  setSubtitleMode: (v: "off" | "auto" | "always-fr") => void;
+
   // Loaded playlist (not persisted — re-fetched on app load)
   playlist: ParsedPlaylist | null;
   setPlaylist: (p: ParsedPlaylist | null) => void;
@@ -54,6 +62,12 @@ export const usePlaylistStore = create<PlaylistState>()(
 
       proxyStreams: true,
       setProxyStreams: (v) => set({ proxyStreams: v }),
+
+      preferredAudio: "fr",
+      setPreferredAudio: (v) => set({ preferredAudio: v }),
+
+      subtitleMode: "auto",
+      setSubtitleMode: (v) => set({ subtitleMode: v }),
 
       playlist: null,
       setPlaylist: (p) => set({ playlist: p }),
@@ -102,6 +116,8 @@ export const usePlaylistStore = create<PlaylistState>()(
       partialize: (s) => ({
         m3uUrl: s.m3uUrl,
         proxyStreams: s.proxyStreams,
+        preferredAudio: s.preferredAudio,
+        subtitleMode: s.subtitleMode,
         favorites: s.favorites,
         watchHistory: s.watchHistory,
       }),

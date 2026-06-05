@@ -8,6 +8,7 @@ import Hls, {
 } from "hls.js";
 import mpegts from "mpegts.js";
 import type { StreamType } from "@/lib/stream";
+import type { LangVariant } from "@/lib/classify";
 import {
   Play,
   Pause,
@@ -49,6 +50,12 @@ type Props = {
   streamType?: StreamType;
   /** Free-form text (channel name + group) used to surface codec hints (HEVC, etc.). */
   codecHint?: string;
+  /** Language packaging detected on the source (drives auto-subtitle behavior). */
+  langVariant?: LangVariant | null;
+  /** Default audio preference — "fr" picks the French dub if available. */
+  preferredAudio?: "fr" | "original";
+  /** Subtitle behavior: "off" never; "auto" on for VOSTFR; "always-fr" always show FR. */
+  subtitleMode?: "off" | "auto" | "always-fr";
   /** When set, called when the user clicks "Essayer sans proxy" in an error state. */
   onTryDirect?: () => void;
   /** When set, called when the user clicks "Forcer HLS" — try hls.js even on .ts URLs. */
@@ -88,6 +95,9 @@ export function Player({
   isVod,
   streamType = "hls",
   codecHint,
+  langVariant,
+  preferredAudio = "fr",
+  subtitleMode = "auto",
   onTryDirect,
   onForceHls,
   title,
@@ -293,6 +303,38 @@ export function Player({
         setAudioTrack(hls.audioTrack);
         setSubtitleTracks(hls.subtitleTracks ?? []);
         setSubtitleTrack(hls.subtitleTrack);
+
+        // --- Auto-apply user audio preference (pick French track if available) ---
+        if (preferredAudio === "fr" && (hls.audioTracks?.length ?? 0) > 1) {
+          const frIdx = hls.audioTracks.findIndex(
+            (t) =>
+              /^(fr|fra|fre)$/i.test(t.lang ?? "") ||
+              /french|français|francais/i.test(t.name ?? "")
+          );
+          if (frIdx >= 0 && frIdx !== hls.audioTrack) {
+            hls.audioTrack = frIdx;
+            setAudioTrack(frIdx);
+          }
+        }
+
+        // --- Auto-apply user subtitle preference ---
+        const wantSubs =
+          subtitleMode === "always-fr" ||
+          (subtitleMode === "auto" && langVariant === "VOSTFR");
+        if (wantSubs && (hls.subtitleTracks?.length ?? 0) > 0) {
+          const frIdx = hls.subtitleTracks.findIndex((t) =>
+            /^(fr|fra|fre)$/i.test(t.lang ?? "")
+          );
+          const targetIdx = frIdx >= 0 ? frIdx : 0;
+          hls.subtitleTrack = targetIdx;
+          hls.subtitleDisplay = true;
+          setSubtitleTrack(targetIdx);
+        } else if (subtitleMode === "off") {
+          hls.subtitleTrack = -1;
+          hls.subtitleDisplay = false;
+          setSubtitleTrack(-1);
+        }
+
         video.play().catch(() => {});
       });
 

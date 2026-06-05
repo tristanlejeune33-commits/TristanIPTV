@@ -18,12 +18,16 @@ export type SeriesInfo = {
   episode?: number;
 };
 
+export type LangVariant = "VF" | "VOSTFR" | "VO" | "MULTI";
+
 export type Classification = {
   type: ContentType;
   isFrench: boolean;
   seriesInfo: SeriesInfo | null;
   /** Production year extracted from title (e.g. "Inception (2010)") if present */
   year: number | null;
+  /** Language packaging tag detected in name/group (VF, VOSTFR, VO, MULTI) */
+  langVariant: LangVariant | null;
 };
 
 // --- French detection --------------------------------------------------------
@@ -177,6 +181,35 @@ export function extractSeriesInfo(name: string): SeriesInfo | null {
 
 const YEAR_REGEX = /(?:^|[\s\(\[\.\-])((?:19|20)\d{2})(?:[\s\)\]\.\-]|$)/;
 
+/**
+ * Detect a French-IPTV language packaging tag inside the name/group.
+ * Order matters: VOSTFR must be tested before VO (it contains "VO") and
+ * before VF (the "FR" variant of VO).
+ */
+export function extractLangVariant(
+  name: string,
+  group?: string
+): LangVariant | null {
+  const hay = `${name} ${group ?? ""}`;
+  // VOSTFR — original audio + French subtitles (also written VOST-FR, VOST.FR, VO ST FR…)
+  if (/\b(VOSTF?R?|VO\s*ST\s*FR?|VO\.?ST\.?FR?|SUB[\s\-_]?FR|SUBFR)\b/i.test(hay)) {
+    return "VOSTFR";
+  }
+  // VF — French dub. VFF (true French), VFQ (Quebec French), MULTI handled separately.
+  if (/\b(VFF?|VFQ|MULTI[\s\-_]?VF)\b/i.test(hay)) {
+    return "VF";
+  }
+  // MULTI — multi-language audio tracks (often VF + VO)
+  if (/\b(MULTI(LANG)?|MULTI\.?AUDIO)\b/i.test(hay)) {
+    return "MULTI";
+  }
+  // VO — original audio, no subs
+  if (/\b(VO|V\.O\.?|ORIGINAL|ORIG|OG)\b/i.test(hay)) {
+    return "VO";
+  }
+  return null;
+}
+
 /** Extract a 4-digit production year from a title if it looks plausible. */
 export function extractYear(name: string): number | null {
   const now = new Date().getFullYear();
@@ -202,6 +235,10 @@ export function classify(input: {
     isFrench: isFrenchChannel(input),
     seriesInfo,
     year: type === "movie" || type === "series" ? extractYear(input.name) : null,
+    langVariant:
+      type === "movie" || type === "series"
+        ? extractLangVariant(input.name, input.group)
+        : null,
   };
 }
 

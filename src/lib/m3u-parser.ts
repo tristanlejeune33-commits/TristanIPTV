@@ -1,4 +1,4 @@
-import { classify, type ContentType, type SeriesInfo } from "./classify";
+import { classify, type ContentType, type LangVariant, type SeriesInfo } from "./classify";
 
 /**
  * M3U / M3U8 playlist parser tailored for IPTV playlists.
@@ -26,6 +26,8 @@ export type Channel = {
   seriesInfo: SeriesInfo | null;
   /** Production year extracted from title if any */
   year: number | null;
+  /** Language packaging tag (VF / VOSTFR / VO / MULTI) detected in the title */
+  langVariant: LangVariant | null;
   /** Original index in the M3U playlist (used as a recency tie-breaker) */
   orderIndex: number;
 };
@@ -150,6 +152,7 @@ export function parseM3U(text: string): ParsedPlaylist {
       isFrench: classification.isFrench,
       seriesInfo: classification.seriesInfo,
       year: classification.year,
+      langVariant: classification.langVariant,
       orderIndex: orderCounter++,
     });
 

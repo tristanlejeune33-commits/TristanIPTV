@@ -38,6 +38,8 @@ export default function WatchPage({
   const markWatched = usePlaylistStore((s) => s.markWatched);
   const history = usePlaylistStore((s) => s.watchHistory);
   const proxyStreams = usePlaylistStore((s) => s.proxyStreams);
+  const preferredAudio = usePlaylistStore((s) => s.preferredAudio);
+  const subtitleMode = usePlaylistStore((s) => s.subtitleMode);
 
   const channel = useMemo(
     () => playlist?.channels.find((c) => c.id === id),
@@ -355,6 +357,9 @@ export default function WatchPage({
             src={effectiveProxy ? proxiedStreamUrl(channel.url) : channel.url}
             streamType={effectiveStreamType}
             codecHint={`${channel.name} ${channel.group}`}
+            langVariant={channel.langVariant}
+            preferredAudio={preferredAudio}
+            subtitleMode={subtitleMode}
             poster={channel.logo}
             startTime={resumeChoice === "resume" ? savedPosition : undefined}
             isVod={isVod}
