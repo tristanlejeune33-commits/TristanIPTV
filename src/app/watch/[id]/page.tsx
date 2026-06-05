@@ -107,6 +107,61 @@ export default function WatchPage({
     };
   }, [channel, playlist]);
 
+  // Alternate language versions of THIS exact content (same S/E for a series
+  // episode, or same cleaned name for a movie). IPTV providers commonly ship
+  // VF and VOSTFR as two separate entries in the playlist.
+  const langAlternates = useMemo(() => {
+    if (!channel || !playlist) return [];
+
+    if (channel.seriesInfo) {
+      const show = playlist.shows[channel.seriesInfo.showSlug];
+      if (!show) return [];
+      return show.episodes.filter(
+        (e) =>
+          e.id !== channel.id &&
+          e.seriesInfo?.season === channel.seriesInfo?.season &&
+          e.seriesInfo?.episode === channel.seriesInfo?.episode
+      );
+    }
+
+    if (channel.type === "movie") {
+      const base = channel.displayName.toLowerCase().trim();
+      if (!base) return [];
+      return playlist.movieChannels.filter(
+        (m) => m.id !== channel.id && m.displayName.toLowerCase().trim() === base
+      );
+    }
+
+    return [];
+  }, [channel, playlist]);
+
+  // Order: VF first, then VOSTFR, MULTI, VO, then untagged. Current first.
+  const langChips = useMemo(() => {
+    if (!channel) return [];
+    const order = { VF: 0, VOSTFR: 1, MULTI: 2, VO: 3 } as const;
+    type Chip = {
+      id: string;
+      label: string;
+      isCurrent: boolean;
+      sortKey: number;
+    };
+    const items: Chip[] = [
+      {
+        id: channel.id,
+        label: channel.langVariant ?? "Cette version",
+        isCurrent: true,
+        sortKey: channel.langVariant ? order[channel.langVariant] : 99,
+      },
+      ...langAlternates.map((alt) => ({
+        id: alt.id,
+        label: alt.langVariant ?? "Alt",
+        isCurrent: false,
+        sortKey: alt.langVariant ? order[alt.langVariant] : 99,
+      })),
+    ];
+    return items.sort((a, b) => a.sortKey - b.sortKey);
+  }, [channel, langAlternates]);
+
   // For series, prev/next is across the show's episodes
   const { prevEpisode, nextEpisode } = useMemo(() => {
     if (!channel || !playlist || channel.type !== "series" || !channel.seriesInfo) {
@@ -289,7 +344,42 @@ export default function WatchPage({
       }`;
 
   const topActions = (
-    <div className="flex items-center gap-2">
+    <div className="flex items-center gap-2 flex-wrap">
+      {/* Language alternates — switch VF/VOSTFR/MULTI/VO instantly when the
+          provider ships them as separate playlist entries. */}
+      {langChips.length > 1 ? (
+        <div className="flex items-center gap-1 mr-1">
+          {langChips.map((chip) =>
+            chip.isCurrent ? (
+              <span
+                key={chip.id}
+                title="Version en cours"
+                className={`h-9 px-3 rounded-full text-xs font-bold border ${
+                  chip.label === "VF"
+                    ? "bg-[var(--accent)] border-[var(--accent)] text-white"
+                    : chip.label === "VOSTFR"
+                      ? "bg-blue-500 border-blue-500 text-white"
+                      : chip.label === "MULTI"
+                        ? "bg-purple-500 border-purple-500 text-white"
+                        : "bg-amber-500 border-amber-500 text-white"
+                }`}
+              >
+                {chip.label}
+              </span>
+            ) : (
+              <Link
+                key={chip.id}
+                href={`/watch/${encodeURIComponent(chip.id)}`}
+                title={`Passer en ${chip.label}`}
+                className="h-9 px-3 rounded-full text-xs font-semibold border border-white/20 bg-black/50 hover:bg-black/70 text-white transition-colors"
+              >
+                {chip.label}
+              </Link>
+            )
+          )}
+        </div>
+      ) : null}
+
       <button
         type="button"
         onClick={goPrev}
