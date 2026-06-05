@@ -1,4 +1,16 @@
 /**
+ * Wrap a remote image URL through our same-origin proxy so the browser
+ * doesn't get blocked by Referer/UA hotlink protection.
+ */
+export function proxiedImageUrl(originalUrl: string): string {
+  const path = `/api/img?url=${encodeURIComponent(originalUrl)}`;
+  if (typeof window !== "undefined" && window.location?.origin) {
+    return `${window.location.origin}${path}`;
+  }
+  return path;
+}
+
+/**
  * Wrap a remote stream URL through our same-origin proxy so the browser
  * doesn't have to deal with CORS / UA restrictions from the IPTV provider.
  *

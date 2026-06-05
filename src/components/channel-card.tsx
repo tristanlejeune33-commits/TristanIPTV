@@ -33,6 +33,26 @@ function ChannelCardImpl({
   // wider logo/thumbnail format.
   const posterStyle = posterOverride ?? channel.type === "movie";
 
+  // Caption logic — for series episodes, prefer the cleaned episode title +
+  // a compact "S01E01" prefix to avoid the duplicated show-name mess in the
+  // raw IPTV titles ("Jujutsu Kaisen S01 Jujutsu Kaisen - S01E01 - ...").
+  const info = channel.seriesInfo;
+  let primaryLabel: string;
+  let secondaryLabel: string;
+  if (info) {
+    const code = [
+      info.season ? `S${String(info.season).padStart(2, "0")}` : "",
+      info.episode ? `E${String(info.episode).padStart(2, "0")}` : "",
+    ]
+      .join("")
+      .trim();
+    primaryLabel = info.episodeTitle ?? info.show;
+    secondaryLabel = code ? `${info.show} · ${code}` : info.show;
+  } else {
+    primaryLabel = channel.displayName;
+    secondaryLabel = channel.group;
+  }
+
   const dims = posterStyle
     ? {
         sm: "w-32 aspect-[2/3]",
@@ -139,10 +159,10 @@ function ChannelCardImpl({
       </Link>
 
       <div className="mt-2 px-1">
-        <p className="text-sm font-medium truncate" title={channel.displayName}>
-          {channel.displayName}
+        <p className="text-sm font-medium truncate" title={primaryLabel}>
+          {primaryLabel}
         </p>
-        <p className="text-xs text-muted truncate">{channel.group}</p>
+        <p className="text-xs text-muted truncate">{secondaryLabel}</p>
       </div>
     </motion.div>
   );

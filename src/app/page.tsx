@@ -94,7 +94,27 @@ export default function Home() {
 
   const topGroups = useMemo(() => {
     if (!playlist) return [];
-    return playlist.groupsSorted.slice(0, 12);
+    // Annotate each group with its dominant content type so the rail picks a
+    // consistent card style (avoids mixing 16:9 logos with 2:3 posters in the
+    // same rail, which looks awful).
+    return playlist.groupsSorted.slice(0, 12).map((group) => {
+      const channels = playlist.groups[group] ?? [];
+      let movies = 0;
+      let live = 0;
+      let series = 0;
+      for (const c of channels) {
+        if (c.type === "movie") movies++;
+        else if (c.type === "series") series++;
+        else live++;
+      }
+      const dominant: "movie" | "series" | "live" =
+        movies >= series && movies >= live
+          ? "movie"
+          : series >= live
+            ? "series"
+            : "live";
+      return { group, channels, dominant };
+    });
   }, [playlist]);
 
   // "Parce que vous avez regardé..." — find the most-watched groups in history,
@@ -259,13 +279,14 @@ export default function Home() {
           </LazySection>
         ) : null}
 
-        {/* Raw groups for discovery (lazy + capped) */}
-        {topGroups.map((group) => (
+        {/* Raw groups for discovery (lazy + capped, uniform style per rail) */}
+        {topGroups.map(({ group, channels, dominant }) => (
           <LazySection key={group}>
             <Rail
               title={group}
-              channels={playlist.groups[group].slice(0, MAX_PER_RAIL)}
+              channels={channels.slice(0, MAX_PER_RAIL)}
               href={`/category/${encodeURIComponent(group)}`}
+              posterStyle={dominant === "movie"}
             />
           </LazySection>
         ))}
