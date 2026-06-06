@@ -1,10 +1,17 @@
 "use client";
 
 import { useEffect, useRef } from "react";
+import { toast } from "sonner";
 import { usePlaylistStore } from "@/lib/store";
 import { parseM3U } from "@/lib/m3u-parser";
+import {
+  formatCacheAge,
+  getCachedPlaylist,
+  setCachedPlaylist,
+} from "@/lib/playlist-cache";
 
-const FETCH_TIMEOUT_MS = 120_000; // 2 min, generous for huge IPTV catalogs
+const FETCH_TIMEOUT_MS = 120_000;
+const STALE_AFTER_MS = 12 * 60 * 60 * 1000; // 12h — background refresh hint
 
 function fmtMb(bytes: number): string {
   return `${(bytes / 1024 / 1024).toFixed(1)} Mo`;
@@ -15,12 +22,18 @@ function nextTick(): Promise<void> {
 }
 
 /**
- * Mounts once at the root layout level.
- * Watches m3uUrl in the store and fetches/parses the playlist whenever it changes.
+ * Boot the playlist for the app:
  *
- * Streaming approach: read the response body in chunks so we can show real
- * download progress on huge playlists. Falls back to a plain text() read if
- * the browser doesn't expose a body reader (older Safari).
+ *   1. Hydrate the M3U URL from the server-side store (the env-var default
+ *      means a fresh device opens with the right URL pre-filled).
+ *   2. Read the IndexedDB cache for that URL — if present, paint the catalog
+ *      INSTANTLY (no network, no parsing).
+ *   3. In the background, refetch + reparse the M3U so the next session has
+ *      fresh data. A silent toast lets the user know when it succeeded.
+ *
+ * The fast path means TV browsers (Chromecast / Fire TV) never sit on the
+ * loading screen on subsequent opens — they always have the catalog ready,
+ * even right after a cold start.
  */
 export function PlaylistLoader() {
   const m3uUrl = usePlaylistStore((s) => s.m3uUrl);
@@ -30,10 +43,7 @@ export function PlaylistLoader() {
   const setError = usePlaylistStore((s) => s.setPlaylistError);
   const setProgress = usePlaylistStore((s) => s.setLoadingProgress);
 
-  // On first mount, hydrate from the server-side store. The server value
-  // wins if local is empty — that's how a freshly-opened iPhone picks up
-  // the URL pasted on the PC. If both exist and disagree, we prefer the
-  // local one (the user might be editing).
+  // Server-side URL hydration (env default / saved state)
   const hydratedRef = useRef(false);
   useEffect(() => {
     if (hydratedRef.current) return;
@@ -47,7 +57,7 @@ export function PlaylistLoader() {
           setM3uUrl(data.m3uUrl);
         }
       } catch {
-        // server persistence is best-effort
+        // best-effort
       }
     })();
   }, [setM3uUrl]);
@@ -61,13 +71,27 @@ export function PlaylistLoader() {
 
     let cancelled = false;
     const controller = new AbortController();
-    const timeoutId = window.setTimeout(() => controller.abort(), FETCH_TIMEOUT_MS);
+    const timeoutId = window.setTimeout(
+      () => controller.abort(),
+      FETCH_TIMEOUT_MS
+    );
 
-    async function load() {
-      setLoading(true);
+    async function bootFromCache(): Promise<boolean> {
+      const cached = await getCachedPlaylist(m3uUrl!);
+      if (cancelled || !cached) return false;
+      setPlaylist(cached.playlist);
       setError(null);
-      setProgress("Connexion au serveur…");
+      setLoading(false);
+      setProgress(null);
+      return true;
+    }
 
+    async function fetchFresh(silent: boolean): Promise<void> {
+      if (!silent) {
+        setLoading(true);
+        setError(null);
+        setProgress("Connexion au serveur…");
+      }
       let text: string;
       try {
         const proxied = `/api/m3u?url=${encodeURIComponent(m3uUrl!)}`;
@@ -75,17 +99,12 @@ export function PlaylistLoader() {
           cache: "no-store",
           signal: controller.signal,
         });
-
-        if (!res.ok) {
-          throw new Error(`Le serveur a répondu HTTP ${res.status}`);
-        }
+        if (!res.ok) throw new Error(`Le serveur a répondu HTTP ${res.status}`);
 
         const contentLength = parseInt(
           res.headers.get("content-length") ?? "0",
           10
         );
-
-        // Try streaming read for progress; fall back to text() on any failure.
         const reader = res.body?.getReader();
         if (reader) {
           try {
@@ -102,22 +121,23 @@ export function PlaylistLoader() {
               }
               chunks.push(value);
               received += value.length;
-              if (Date.now() - lastUpdate > 250) {
+              if (!silent && Date.now() - lastUpdate > 250) {
                 lastUpdate = Date.now();
                 setProgress(
                   contentLength > 0
-                    ? `Téléchargement ${fmtMb(received)} / ${fmtMb(contentLength)}`
+                    ? `Téléchargement ${fmtMb(received)} / ${fmtMb(
+                        contentLength
+                      )}`
                     : `Téléchargement ${fmtMb(received)}`
                 );
               }
             }
-            setProgress(`Téléchargement terminé (${fmtMb(received)})`);
+            if (!silent)
+              setProgress(`Téléchargement terminé (${fmtMb(received)})`);
             await nextTick();
             const blob = new Blob(chunks as unknown as BlobPart[]);
             text = await blob.text();
           } catch {
-            // If streaming failed mid-read, fall back to a fresh plain fetch
-            setProgress("Téléchargement en cours…");
             const res2 = await fetch(proxied, {
               cache: "no-store",
               signal: controller.signal,
@@ -126,50 +146,69 @@ export function PlaylistLoader() {
             text = await res2.text();
           }
         } else {
-          // No body reader exposed — go straight to text()
-          setProgress("Téléchargement en cours…");
           text = await res.text();
         }
 
         window.clearTimeout(timeoutId);
-
         if (cancelled) return;
 
         if (!text.includes("#EXTM3U") && !text.includes("#EXTINF")) {
-          throw new Error("Le fichier ne ressemble pas à une playlist M3U valide");
+          throw new Error(
+            "Le fichier ne ressemble pas à une playlist M3U valide"
+          );
         }
 
-        setProgress("Analyse de la playlist…");
+        if (!silent) setProgress("Analyse de la playlist…");
         await nextTick();
 
         const parsed = parseM3U(text);
-
         if (cancelled) return;
 
-        setProgress(
-          `${parsed.channels.length} chaînes · ${parsed.groupsSorted.length} catégories`
-        );
+        if (!silent) {
+          setProgress(
+            `${parsed.channels.length} chaînes · ${parsed.groupsSorted.length} catégories`
+          );
+        }
         setPlaylist(parsed);
+        setError(null);
+
+        // Persist to cache for the next cold start
+        setCachedPlaylist(m3uUrl!, parsed).catch(() => {});
+
+        if (silent) {
+          toast.success("Catalogue mis à jour", {
+            description: `${parsed.channels.length} chaînes · ${parsed.groupsSorted.length} catégories`,
+            duration: 2500,
+          });
+        }
       } catch (err) {
         if (cancelled) return;
         const isAbort =
           err instanceof DOMException && err.name === "AbortError";
-        if (isAbort) {
-          setError(
-            `Délai dépassé (${FETCH_TIMEOUT_MS / 1000}s). Le serveur IPTV ne répond pas ou la playlist est trop volumineuse.`
-          );
+        const msg = isAbort
+          ? `Délai dépassé (${FETCH_TIMEOUT_MS / 1000}s)`
+          : err instanceof Error
+            ? err.message
+            : "Erreur inconnue";
+
+        if (silent) {
+          // Don't disrupt the user — they're already watching the cached
+          // catalog. Just log a soft notice.
+          toast.warning("Mise à jour échouée", {
+            description: msg,
+            duration: 3000,
+          });
         } else {
-          const msg = err instanceof Error ? err.message : "Erreur inconnue";
           setError(
             msg.toLowerCase().includes("load failed") ||
               msg.toLowerCase().includes("network")
               ? `${msg}. Vérifie ta connexion WiFi et réessaie.`
               : msg
           );
+          setPlaylist(null);
         }
-        setPlaylist(null);
       } finally {
-        if (!cancelled) {
+        if (!cancelled && !silent) {
           setLoading(false);
           setTimeout(() => {
             if (!cancelled) setProgress(null);
@@ -178,7 +217,25 @@ export function PlaylistLoader() {
       }
     }
 
-    load();
+    (async () => {
+      const cached = await getCachedPlaylist(m3uUrl!);
+      const hasCache = await bootFromCache();
+      if (hasCache && cached) {
+        // Got the fast path. Now refresh in background only if the cache
+        // is stale enough to be worth the work.
+        const stale = Date.now() - cached.timestamp > STALE_AFTER_MS;
+        if (stale) {
+          toast(`Mise à jour du catalogue (${formatCacheAge(cached.timestamp)})`, {
+            duration: 2000,
+          });
+          fetchFresh(true);
+        }
+      } else {
+        // Cold start with no cache — full visible load
+        await fetchFresh(false);
+      }
+    })();
+
     return () => {
       cancelled = true;
       window.clearTimeout(timeoutId);
