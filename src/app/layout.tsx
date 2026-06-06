@@ -5,6 +5,7 @@ import "./globals.css";
 import { PlaylistLoader } from "@/components/playlist-loader";
 import { Topbar } from "@/components/topbar";
 import { CommandPalette } from "@/components/command-palette";
+import { TvNav } from "@/components/tv-nav";
 
 const geistSans = Geist({
   variable: "--font-geist-sans",
@@ -43,6 +44,7 @@ export default function RootLayout({
     >
       <body className="min-h-full flex flex-col bg-background text-foreground">
         <PlaylistLoader />
+        <TvNav />
         <Topbar />
         <main className="flex-1">{children}</main>
         <CommandPalette />

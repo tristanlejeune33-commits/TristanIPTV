@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
+  <!-- Maskable icons fill the entire canvas. Android applies its own mask
+       (circle / squircle / square). Content must stay within the central
+       80% safe zone (centered at 256, radius ~205). -->
+  <rect width="512" height="512" fill="#0a0a0a"/>
+  <g transform="translate(146 176) scale(1.4)">
+    <text x="0" y="120" font-family="-apple-system, system-ui, sans-serif" font-weight="900" font-size="150" fill="#e50914" letter-spacing="-8">T</text>
+  </g>
+</svg>

@@ -74,6 +74,7 @@ function RailImpl({
 
         <div
           ref={scrollerRef}
+          data-rail-scroller
           className="flex gap-3 md:gap-4 px-4 md:px-8 pb-6 overflow-x-auto no-scrollbar scroll-smooth"
         >
           {channels.map((ch) => (
