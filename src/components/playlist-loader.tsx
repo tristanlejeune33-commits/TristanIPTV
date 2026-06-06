@@ -8,7 +8,7 @@ import {
   setCachedPlaylist,
 } from "@/lib/playlist-cache";
 
-const FETCH_TIMEOUT_MS = 120_000;
+const FETCH_TIMEOUT_MS = 180_000; // 3 min — generous for slow 4G / large playlists
 
 function fmtMb(bytes: number): string {
   return `${(bytes / 1024 / 1024).toFixed(1)} Mo`;

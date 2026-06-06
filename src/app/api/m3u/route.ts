@@ -4,14 +4,27 @@ import { NextRequest, NextResponse } from "next/server";
  * Proxy endpoint to fetch an M3U playlist server-side.
  *
  * - Bypasses browser CORS / UA filters on the IPTV host.
- * - STREAMS the response back so a slow upstream doesn't make Safari iOS
- *   give up with "Load failed" while waiting for the full body to buffer
- *   on the server side.
+ * - Buffers the upstream response so Vercel's edge CDN can cache it. After
+ *   any device loads the M3U once, every subsequent request — from a phone
+ *   on slow 4G, a TV on the same network, an iPad anywhere — gets served
+ *   from the CDN in tens of milliseconds instead of waiting on the IPTV
+ *   provider again.
  *
  * Usage: GET /api/m3u?url=https%3A%2F%2Fhost%2Fplaylist.m3u
  */
 export const runtime = "nodejs";
-export const dynamic = "force-dynamic";
+// No `force-dynamic` — we want Vercel to cache this response at the edge.
+// The query string (?url=…) is part of the cache key so different M3U URLs
+// don't collide.
+
+const UA = "VLC/3.0.20 LibVLC/3.0.20";
+
+// Edge cache TTLs:
+//   public, max-age=600           → browser cache 10 min
+//   s-maxage=3600                 → Vercel edge cache 1 hour
+//   stale-while-revalidate=86400  → serve stale up to 24h while revalidating
+const CACHE_HEADER =
+  "public, max-age=600, s-maxage=3600, stale-while-revalidate=86400";
 
 export async function GET(req: NextRequest) {
   const url = req.nextUrl.searchParams.get("url");
@@ -36,8 +49,7 @@ export async function GET(req: NextRequest) {
   let upstream: Response;
   try {
     upstream = await fetch(target.toString(), {
-      // Many IPTV providers block default Node UA — send something neutral
-      headers: { "User-Agent": "VLC/3.0.20 LibVLC/3.0.20", Accept: "*/*" },
+      headers: { "User-Agent": UA, Accept: "*/*" },
       cache: "no-store",
       redirect: "follow",
     });
@@ -58,19 +70,19 @@ export async function GET(req: NextRequest) {
     );
   }
 
-  // Forward useful headers (notably Content-Length for progress) and stream
-  // the body straight through. The client sees bytes immediately, the server
-  // never has to buffer the whole multi-MB playlist in memory.
-  const headers = new Headers({
-    "Content-Type": "application/vnd.apple.mpegurl; charset=utf-8",
-    "Cache-Control": "no-store",
-    "Access-Control-Allow-Origin": "*",
-  });
-  const upstreamLen = upstream.headers.get("content-length");
-  if (upstreamLen) headers.set("Content-Length", upstreamLen);
+  // BUFFER the upstream so the edge CDN can cache the full body. Streaming
+  // responses bypass the cache entirely, defeating the whole point of going
+  // through this proxy on subsequent visits.
+  const text = await upstream.text();
 
-  return new NextResponse(upstream.body, {
+  return new NextResponse(text, {
     status: 200,
-    headers,
+    headers: {
+      "Content-Type": "application/vnd.apple.mpegurl; charset=utf-8",
+      "Cache-Control": CACHE_HEADER,
+      "Access-Control-Allow-Origin": "*",
+      // Help debugging: tag responses so we can spot cache hits in the headers
+      "X-Tristan-Cache-Source": "origin",
+    },
   });
 }
