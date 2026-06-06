@@ -22,8 +22,10 @@ export const runtime = "nodejs";
 
 const UA = "VLC/3.0.20 LibVLC/3.0.20";
 
+// Short edge TTL while you iterate on filter config — changes propagate
+// in ~60s instead of 1h. Client IDB cache still gives instant 2nd-load.
 const CACHE_HEADER =
-  "public, max-age=600, s-maxage=3600, stale-while-revalidate=86400";
+  "public, max-age=60, s-maxage=60, stale-while-revalidate=300";
 
 const DEFAULT_EXCLUDE =
   "xxx,porn,adult,18+,erotic,erotique,adulte,for_adults,brazzers";
