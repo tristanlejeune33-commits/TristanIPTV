@@ -30,8 +30,13 @@ const DEFAULT_EXCLUDE =
 
 function parseKeywords(value: string | undefined): string[] {
   if (!value) return [];
+  // Split on comma, semicolon, or newline ONLY. The pipe character `|` is
+  // legitimately part of many IPTV group prefixes ("FR|", "AL|", "EN|", …)
+  // and must survive intact, otherwise a filter like "AL|,AR|" would match
+  // the substring "en" everywhere ("vendetta", "henson", …) and wipe the
+  // whole catalog.
   return value
-    .split(/[,;|\n]/)
+    .split(/[,;\n]/)
     .map((s) => s.trim().toLowerCase())
     .filter((s) => s.length > 0);
 }
@@ -237,7 +242,17 @@ export async function GET(req: NextRequest) {
 
   const rawText = await upstream.text();
   const predicate = buildFilterPredicate();
-  const { filtered, kept, dropped, byType } = filterM3U(rawText, predicate);
+  const { filtered: filteredAttempt, kept, dropped, byType } = filterM3U(
+    rawText,
+    predicate
+  );
+
+  // Safety net : if the filter wiped out literally everything (typically
+  // because of a too-broad keyword like "en" or "fr"), fall back to the raw
+  // upstream so the user at least sees the catalog. A header signals the
+  // fail-open so devtools can spot the misconfiguration.
+  const tooAggressive = kept === 0 && dropped > 0;
+  const filtered = tooAggressive ? rawText : filteredAttempt;
 
   return new NextResponse(filtered, {
     status: 200,
@@ -252,6 +267,7 @@ export async function GET(req: NextRequest) {
       "X-Tristan-Live-Kept": String(byType.live.kept),
       "X-Tristan-Movies-Kept": String(byType.movie.kept),
       "X-Tristan-Series-Kept": String(byType.series.kept),
+      "X-Tristan-Filter-FailOpen": tooAggressive ? "true" : "false",
     },
   });
 }
