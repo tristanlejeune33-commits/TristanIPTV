@@ -3,25 +3,25 @@ import { NextRequest, NextResponse } from "next/server";
 /**
  * Proxy endpoint to fetch (and optionally filter) an M3U playlist.
  *
- * - Bypasses browser CORS / UA filters on the IPTV host.
- * - Streams the upstream into memory then BUFFERS the response so Vercel's
- *   edge CDN can cache it.
- * - Applies server-side filtering driven by env vars so massive bouquets
- *   (the user we built this for has a 136 MB playlist!) get trimmed to
- *   something a mobile client can actually download and parse:
- *     M3U_INCLUDE  — comma-separated keywords; if set, only EXTINF lines
- *                    containing at least one of these (case-insensitive) are
- *                    kept. Empty = keep all.
- *     M3U_EXCLUDE  — comma-separated keywords; matching EXTINF lines are
- *                    dropped. Defaults to a sensible adult-content blacklist.
+ * Filters (all comma-separated, case-insensitive, applied on the #EXTINF line):
  *
- * Usage: GET /api/m3u?url=https%3A%2F%2Fhost%2Fplaylist.m3u
+ *   M3U_INCLUDE          — Global allow-list. If set, only entries matching
+ *                          at least one keyword survive (any type).
+ *   M3U_EXCLUDE          — Global deny-list. Defaults to adult-content
+ *                          blacklist. Always applied first.
+ *
+ *   M3U_LIVE_INCLUDE     — Extra allow-list, applied only to live TV entries.
+ *   M3U_MOVIE_INCLUDE    — Extra allow-list, applied only to movies.
+ *   M3U_SERIES_INCLUDE   — Extra allow-list, applied only to series episodes.
+ *
+ * Example for "all live + all movies + only French series":
+ *   M3U_EXCLUDE=XXX,porn,adult,AR|,EN|,DE|,IT|,RU|,TR|,US|, …
+ *   M3U_SERIES_INCLUDE=VF,VOSTFR,VFF,VFQ,MULTI
  */
 export const runtime = "nodejs";
 
 const UA = "VLC/3.0.20 LibVLC/3.0.20";
 
-// Edge cache: 10 min browser, 1h CDN, 24h stale-while-revalidate
 const CACHE_HEADER =
   "public, max-age=600, s-maxage=3600, stale-while-revalidate=86400";
 
@@ -36,36 +36,100 @@ function parseKeywords(value: string | undefined): string[] {
     .filter((s) => s.length > 0);
 }
 
+type EntryType = "live" | "movie" | "series";
+
+const SERIES_KEYWORDS = [
+  "serie",
+  "series",
+  "séries",
+  "show",
+  "tv show",
+  "épisode",
+  "episode",
+];
+const MOVIE_KEYWORDS = [
+  "film",
+  "movie",
+  "cinéma",
+  "cinema",
+  "vod",
+  "affiche",
+  "4k",
+  "uhd",
+  "fhd",
+  "hd",
+];
+
+function detectType(extinf: string): EntryType {
+  const lower = extinf.toLowerCase();
+  if (SERIES_KEYWORDS.some((kw) => lower.includes(kw))) return "series";
+  // Episode-pattern in the name (S01E01, 1x05, etc.) → series even if group
+  // didn't say so
+  if (/\bs\d{1,3}\s*[\.xee]\s*\d{1,3}\b/i.test(lower)) return "series";
+  if (MOVIE_KEYWORDS.some((kw) => lower.includes(kw))) return "movie";
+  return "live";
+}
+
 function buildFilterPredicate(): (extinf: string) => boolean {
-  const include = parseKeywords(process.env.M3U_INCLUDE);
-  const exclude = parseKeywords(process.env.M3U_EXCLUDE ?? DEFAULT_EXCLUDE);
+  const globalInclude = parseKeywords(process.env.M3U_INCLUDE);
+  const globalExclude = parseKeywords(
+    process.env.M3U_EXCLUDE ?? DEFAULT_EXCLUDE
+  );
+  const liveInclude = parseKeywords(process.env.M3U_LIVE_INCLUDE);
+  const movieInclude = parseKeywords(process.env.M3U_MOVIE_INCLUDE);
+  const seriesInclude = parseKeywords(process.env.M3U_SERIES_INCLUDE);
 
   return (extinf: string) => {
     const lower = extinf.toLowerCase();
-    if (exclude.length > 0 && exclude.some((k) => lower.includes(k))) {
+
+    // 1. Global exclude blacklist — always wins
+    if (globalExclude.length > 0 && globalExclude.some((k) => lower.includes(k))) {
       return false;
     }
-    if (include.length === 0) return true;
-    return include.some((k) => lower.includes(k));
+
+    // 2. Global include allow-list — if set, must match
+    if (globalInclude.length > 0 && !globalInclude.some((k) => lower.includes(k))) {
+      return false;
+    }
+
+    // 3. Type-specific include — if set FOR THIS TYPE, must match
+    const type = detectType(extinf);
+    if (type === "series" && seriesInclude.length > 0) {
+      return seriesInclude.some((k) => lower.includes(k));
+    }
+    if (type === "movie" && movieInclude.length > 0) {
+      return movieInclude.some((k) => lower.includes(k));
+    }
+    if (type === "live" && liveInclude.length > 0) {
+      return liveInclude.some((k) => lower.includes(k));
+    }
+
+    return true;
   };
 }
 
-/**
- * Walk the raw M3U line by line and keep only entries whose EXTINF passes
- * the predicate. An "entry" is the EXTINF directive + any continuation
- * directive lines (EXTGRP, EXTVLCOPT, …) + the URL line that follows.
- */
 function filterM3U(
   text: string,
   shouldKeep: (extinf: string) => boolean
-): { filtered: string; kept: number; dropped: number } {
+): {
+  filtered: string;
+  kept: number;
+  dropped: number;
+  byType: Record<EntryType, { kept: number; dropped: number }>;
+} {
   const lines = text.split(/\r?\n/);
   const out: string[] = [];
   let pendingExtinf: string | null = null;
   let pendingDirectives: string[] = [];
   let pendingPasses = true;
+  let pendingType: EntryType = "live";
   let kept = 0;
   let dropped = 0;
+  const byType: Record<EntryType, { kept: number; dropped: number }> = {
+    live: { kept: 0, dropped: 0 },
+    movie: { kept: 0, dropped: 0 },
+    series: { kept: 0, dropped: 0 },
+  };
 
   function flush(urlLine: string | null) {
     if (pendingExtinf && pendingPasses && urlLine) {
@@ -73,10 +137,11 @@ function filterM3U(
       out.push(...pendingDirectives);
       out.push(urlLine);
       kept++;
+      byType[pendingType].kept++;
     } else if (pendingExtinf) {
       dropped++;
+      byType[pendingType].dropped++;
     } else if (urlLine) {
-      // URL line with no EXTINF — uncommon, keep it as-is
       out.push(urlLine);
     }
     pendingExtinf = null;
@@ -94,20 +159,19 @@ function filterM3U(
     }
 
     if (trimmed.startsWith("#EXTINF")) {
-      // New entry begins — but we might have a previous EXTINF without URL
       if (pendingExtinf) {
-        // Orphan EXTINF, drop it
         dropped++;
+        byType[pendingType].dropped++;
         pendingExtinf = null;
         pendingDirectives = [];
       }
       pendingExtinf = line;
+      pendingType = detectType(line);
       pendingPasses = shouldKeep(line);
       continue;
     }
 
     if (trimmed.startsWith("#")) {
-      // Auxiliary directive (#EXTGRP, #EXTVLCOPT, #EXT-X-…) — attach to pending entry
       if (pendingExtinf) {
         pendingDirectives.push(line);
       } else {
@@ -116,14 +180,15 @@ function filterM3U(
       continue;
     }
 
-    // URL line — completes the pending entry
     flush(line);
   }
 
-  // Trailing orphan EXTINF, if any
-  if (pendingExtinf) dropped++;
+  if (pendingExtinf) {
+    dropped++;
+    byType[pendingType].dropped++;
+  }
 
-  return { filtered: out.join("\n"), kept, dropped };
+  return { filtered: out.join("\n"), kept, dropped, byType };
 }
 
 export async function GET(req: NextRequest) {
@@ -171,10 +236,8 @@ export async function GET(req: NextRequest) {
   }
 
   const rawText = await upstream.text();
-
-  // Apply filtering — typically takes 100-500ms even on a 100MB+ M3U
   const predicate = buildFilterPredicate();
-  const { filtered, kept, dropped } = filterM3U(rawText, predicate);
+  const { filtered, kept, dropped, byType } = filterM3U(rawText, predicate);
 
   return new NextResponse(filtered, {
     status: 200,
@@ -182,11 +245,13 @@ export async function GET(req: NextRequest) {
       "Content-Type": "application/vnd.apple.mpegurl; charset=utf-8",
       "Cache-Control": CACHE_HEADER,
       "Access-Control-Allow-Origin": "*",
-      // Debug headers — visible in browser devtools / `curl -I`
       "X-Tristan-Original-Bytes": String(rawText.length),
       "X-Tristan-Filtered-Bytes": String(filtered.length),
       "X-Tristan-Entries-Kept": String(kept),
       "X-Tristan-Entries-Dropped": String(dropped),
+      "X-Tristan-Live-Kept": String(byType.live.kept),
+      "X-Tristan-Movies-Kept": String(byType.movie.kept),
+      "X-Tristan-Series-Kept": String(byType.series.kept),
     },
   });
 }
