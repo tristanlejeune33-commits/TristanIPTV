@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { Command } from "cmdk";
 import {
@@ -16,6 +16,7 @@ import {
 } from "lucide-react";
 import { toast } from "sonner";
 import { usePlaylistStore } from "@/lib/store";
+import { useSearch } from "@/lib/hooks";
 import { getChannelInitials, getFallbackGradient } from "@/lib/colors";
 
 export function CommandPalette() {
@@ -23,7 +24,6 @@ export function CommandPalette() {
   const [query, setQuery] = useState("");
   const router = useRouter();
 
-  const playlist = usePlaylistStore((s) => s.playlist);
   const clearHistory = usePlaylistStore((s) => s.clearHistory);
 
   useEffect(() => {
@@ -42,42 +42,11 @@ export function CommandPalette() {
     return () => window.removeEventListener("keydown", down);
   }, []);
 
+  const { data: results } = useSearch(query, 8);
+
   function closePalette() {
     setOpen(false);
   }
-
-  const matchesQuery = useMemo(() => {
-    const tokens = query.toLowerCase().split(/\s+/).filter(Boolean);
-    return (hay: string) =>
-      tokens.length === 0 || tokens.every((t) => hay.toLowerCase().includes(t));
-  }, [query]);
-
-  const liveChannels = useMemo(() => {
-    if (!playlist) return [];
-    const list = playlist.liveChannels.filter((c) => matchesQuery(`${c.name} ${c.group}`));
-    return query.trim() ? list.slice(0, 8) : list.slice(0, 5);
-  }, [playlist, matchesQuery, query]);
-
-  const movieChannels = useMemo(() => {
-    if (!playlist) return [];
-    const list = playlist.movieChannels.filter((c) => matchesQuery(`${c.name} ${c.group}`));
-    return query.trim() ? list.slice(0, 8) : list.slice(0, 5);
-  }, [playlist, matchesQuery, query]);
-
-  const shows = useMemo(() => {
-    if (!playlist) return [];
-    const list = playlist.showsSorted
-      .map((slug) => playlist.shows[slug])
-      .filter((s) => matchesQuery(s.show));
-    return query.trim() ? list.slice(0, 8) : list.slice(0, 5);
-  }, [playlist, matchesQuery, query]);
-
-  const groups = useMemo(() => {
-    if (!playlist) return [];
-    const list = playlist.groupsSorted.filter((g) => matchesQuery(g));
-    return list.slice(0, 5);
-  }, [playlist, matchesQuery]);
-
   function go(href: string) {
     closePalette();
     router.push(href);
@@ -119,17 +88,17 @@ export function CommandPalette() {
               <Item icon={<Radio size={14} />} label="Chaînes en direct" onSelect={() => go("/live")} />
               <Item icon={<Film size={14} />} label="Films" onSelect={() => go("/movies")} />
               <Item icon={<Tv size={14} />} label="Séries" onSelect={() => go("/series")} />
-              <Item icon={<Layers size={14} />} label="Parcourir toutes les catégories" onSelect={() => go("/browse")} />
-              <Item icon={<Heart size={14} />} label="Mes favoris" onSelect={() => go("/favorites")} />
+              <Item icon={<Layers size={14} />} label="Parcourir" onSelect={() => go("/browse")} />
+              <Item icon={<Heart size={14} />} label="Favoris" onSelect={() => go("/favorites")} />
               <Item icon={<Settings size={14} />} label="Paramètres" onSelect={() => go("/settings")} />
             </Section>
 
-            {liveChannels.length > 0 ? (
-              <Section heading="Chaînes en direct">
-                {liveChannels.map((c) => (
+            {results && results.live.length > 0 ? (
+              <Section heading="Chaînes">
+                {results.live.map((c) => (
                   <ChannelItem
                     key={c.id}
-                    name={c.name}
+                    name={c.displayName}
                     sub={c.group}
                     isFrench={c.isFrench}
                     seedId={c.id}
@@ -140,12 +109,12 @@ export function CommandPalette() {
               </Section>
             ) : null}
 
-            {movieChannels.length > 0 ? (
+            {results && results.movies.length > 0 ? (
               <Section heading="Films">
-                {movieChannels.map((c) => (
+                {results.movies.map((c) => (
                   <ChannelItem
                     key={c.id}
-                    name={c.name}
+                    name={c.displayName}
                     sub={c.group}
                     isFrench={c.isFrench}
                     seedId={c.id}
@@ -156,37 +125,18 @@ export function CommandPalette() {
               </Section>
             ) : null}
 
-            {shows.length > 0 ? (
+            {results && results.shows.length > 0 ? (
               <Section heading="Séries">
-                {shows.map((s) => (
+                {results.shows.map((s) => (
                   <ChannelItem
                     key={s.showSlug}
                     name={s.show}
-                    sub={`${s.episodes.length} épisode${s.episodes.length > 1 ? "s" : ""}`}
+                    sub={`${s.episodeCount} épisode${s.episodeCount > 1 ? "s" : ""}`}
                     isFrench={s.isFrench}
                     seedId={s.showSlug}
                     onSelect={() => go(`/series/${encodeURIComponent(s.showSlug)}`)}
                     icon={<Tv size={14} className="text-muted" />}
                   />
-                ))}
-              </Section>
-            ) : null}
-
-            {groups.length > 0 ? (
-              <Section heading="Catégories">
-                {groups.map((g) => (
-                  <Command.Item
-                    key={g}
-                    value={`group-${g}`}
-                    onSelect={() => go(`/category/${encodeURIComponent(g)}`)}
-                    className="flex items-center gap-3 px-3 py-2 rounded-md aria-selected:bg-card-hover cursor-pointer"
-                  >
-                    <Layers size={14} className="text-muted" />
-                    <span className="text-sm flex-1">{g}</span>
-                    <span className="text-xs text-muted">
-                      {playlist?.groups[g]?.length ?? 0}
-                    </span>
-                  </Command.Item>
                 ))}
               </Section>
             ) : null}
@@ -204,23 +154,6 @@ export function CommandPalette() {
               />
             </Section>
           </Command.List>
-
-          <div className="flex items-center justify-between gap-2 px-4 py-2 border-t border-border text-[11px] text-muted">
-            <div className="flex items-center gap-3">
-              <span className="flex items-center gap-1">
-                <kbd className="bg-background border border-border rounded px-1.5 py-0.5">↑↓</kbd>
-                naviguer
-              </span>
-              <span className="flex items-center gap-1">
-                <kbd className="bg-background border border-border rounded px-1.5 py-0.5">↵</kbd>
-                ouvrir
-              </span>
-            </div>
-            <span className="flex items-center gap-1">
-              <kbd className="bg-background border border-border rounded px-1.5 py-0.5">⌘K</kbd>
-              fermer
-            </span>
-          </div>
         </Command>
       </div>
     </div>

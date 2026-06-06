@@ -5,15 +5,15 @@ import { useRouter } from "next/navigation";
 import { Loader2, Save, Trash2, ExternalLink, Shield, Subtitles, Languages } from "lucide-react";
 import { toast } from "sonner";
 import { usePlaylistStore } from "@/lib/store";
-import { clearCachedPlaylist } from "@/lib/playlist-cache";
+import { resetCatalogCache } from "@/lib/catalog-client";
 
 export default function SettingsPage() {
   const router = useRouter();
   const currentUrl = usePlaylistStore((s) => s.m3uUrl);
   const setM3uUrl = usePlaylistStore((s) => s.setM3uUrl);
-  const playlist = usePlaylistStore((s) => s.playlist);
-  const loading = usePlaylistStore((s) => s.loadingPlaylist);
-  const error = usePlaylistStore((s) => s.playlistError);
+  const meta = usePlaylistStore((s) => s.meta);
+  const loading = usePlaylistStore((s) => s.loadingMeta);
+  const error = usePlaylistStore((s) => s.metaError);
   const clearHistory = usePlaylistStore((s) => s.clearHistory);
   const favorites = usePlaylistStore((s) => s.favorites);
   const history = usePlaylistStore((s) => s.watchHistory);
@@ -56,13 +56,11 @@ export default function SettingsPage() {
 
   async function retry() {
     if (!currentUrl) return;
-    // Wipe the cached parsed playlist so the loader pulls a fresh M3U
-    await clearCachedPlaylist(currentUrl);
-    // Force a re-run of the loader by toggling the URL
+    resetCatalogCache();
     setM3uUrl(null);
     setTimeout(() => setM3uUrl(currentUrl), 50);
     toast("Nouvelle tentative…", {
-      description: "Cache vidé, téléchargement frais en cours",
+      description: "Cache vidé, rechargement en cours",
     });
   }
 
@@ -151,17 +149,15 @@ export default function SettingsPage() {
             </div>
           ) : null}
 
-          {playlist && !loading && !error ? (
+          {meta && !loading && !error ? (
             <div className="mt-2 p-4 rounded-md bg-emerald-500/5 border border-emerald-500/20 text-sm space-y-1">
               <p>
-                <strong className="text-emerald-300">
-                  {playlist.channels.length}
-                </strong>{" "}
-                chaînes chargées dans{" "}
-                <strong className="text-emerald-300">
-                  {playlist.groupsSorted.length}
-                </strong>{" "}
-                catégories.
+                <strong className="text-emerald-300">{meta.totalLive}</strong>{" "}
+                chaînes live ·{" "}
+                <strong className="text-emerald-300">{meta.totalMovies}</strong>{" "}
+                films ·{" "}
+                <strong className="text-emerald-300">{meta.totalShows}</strong>{" "}
+                séries
               </p>
               <button
                 type="button"

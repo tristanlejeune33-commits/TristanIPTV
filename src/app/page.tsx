@@ -1,153 +1,71 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useMemo } from "react";
+import Link from "next/link";
+import { Radio, Film, Tv, Layers, Heart } from "lucide-react";
 import { usePlaylistStore } from "@/lib/store";
-import { Hero } from "@/components/hero";
+import { useList, useMeta, useShows, useChannelsByIds } from "@/lib/hooks";
 import { Rail } from "@/components/rail";
 import { ShowRail } from "@/components/show-rail";
 import { EmptyState } from "@/components/empty-state";
-// Skeleton imports removed — full loading screen replaces the placeholder rails.
+import { SkeletonHero, SkeletonRail } from "@/components/skeleton";
 import { TypeShortcuts } from "@/components/type-shortcuts";
-import { LazySection } from "@/components/lazy-section";
+import { Hero } from "@/components/hero";
 import { FullLoadingScreen } from "@/components/full-loading-screen";
+import { itemToChannel, showItemToGroup } from "@/lib/adapter";
 
-const MAX_PER_RAIL = 24;
+const MAX_PER_RAIL = 18;
 
 export default function Home() {
-  const playlist = usePlaylistStore((s) => s.playlist);
-  const loading = usePlaylistStore((s) => s.loadingPlaylist);
-  const error = usePlaylistStore((s) => s.playlistError);
-  const progress = usePlaylistStore((s) => s.loadingProgress);
   const m3uUrl = usePlaylistStore((s) => s.m3uUrl);
+  const progress = usePlaylistStore((s) => s.loadingProgress);
   const favorites = usePlaylistStore((s) => s.favorites);
   const history = usePlaylistStore((s) => s.watchHistory);
 
-  // Featured channel — refreshed roughly every 6h, FR-prioritized
-  const [timeBucket, setTimeBucket] = useState<number | null>(null);
-  useEffect(() => {
-    const compute = () => setTimeBucket(Math.floor(Date.now() / (1000 * 60 * 60 * 6)));
-    compute();
-    const id = window.setInterval(compute, 60 * 1000);
-    return () => window.clearInterval(id);
-  }, []);
+  const metaState = useMeta();
+  const meta = metaState.data;
 
-  const featuredChannel = useMemo(() => {
-    if (!playlist || playlist.channels.length === 0 || timeBucket === null) return null;
-    const frenchLive = playlist.liveChannels.filter((c) => c.isFrench);
-    const pool =
-      frenchLive.length > 0
-        ? frenchLive
-        : playlist.liveChannels.length > 0
-          ? playlist.liveChannels
-          : playlist.channels;
-    return pool[timeBucket % pool.length];
-  }, [playlist, timeBucket]);
+  // Each rail is its own paginated API call → tiny payloads, never holds
+  // the full catalog in memory.
+  const frenchLive = useList({
+    type: "live",
+    french: true,
+    pageSize: MAX_PER_RAIL,
+  });
+  const frenchMovies = useList({
+    type: "movie",
+    french: true,
+    sort: "year",
+    pageSize: MAX_PER_RAIL,
+  });
+  const internationalLive = useList({
+    type: "live",
+    pageSize: MAX_PER_RAIL,
+  });
+  const allMovies = useList({
+    type: "movie",
+    sort: "year",
+    pageSize: MAX_PER_RAIL,
+  });
+  const frenchShows = useShows({
+    french: true,
+    pageSize: MAX_PER_RAIL,
+  });
+  const allShows = useShows({ pageSize: MAX_PER_RAIL });
 
-  const favoriteChannels = useMemo(() => {
-    if (!playlist) return [];
-    return favorites
-      .map((id) => playlist.channels.find((c) => c.id === id))
-      .filter((c): c is NonNullable<typeof c> => c !== undefined);
-  }, [playlist, favorites]);
-
-  const continueWatching = useMemo(() => {
-    if (!playlist) return [];
-    return history
-      .map((h) => playlist.channels.find((c) => c.id === h.channelId))
-      .filter((c): c is NonNullable<typeof c> => c !== undefined);
-  }, [playlist, history]);
-
-  const recentMovies = useMemo(
-    () => playlist?.movieChannels.slice(0, MAX_PER_RAIL) ?? [],
-    [playlist]
+  const favIds = useMemo(() => favorites.slice(0, MAX_PER_RAIL), [favorites]);
+  const histIds = useMemo(
+    () => history.slice(0, MAX_PER_RAIL).map((h) => h.channelId),
+    [history]
   );
-
-  const recentShows = useMemo(() => {
-    if (!playlist) return [];
-    return playlist.showsSorted
-      .map((s) => playlist.shows[s])
-      .slice(0, MAX_PER_RAIL);
-  }, [playlist]);
-
-  const frenchLive = useMemo(
-    () => playlist?.liveChannels.filter((c) => c.isFrench).slice(0, MAX_PER_RAIL) ?? [],
-    [playlist]
-  );
-
-  const frenchMovies = useMemo(
-    () => playlist?.movieChannels.filter((c) => c.isFrench).slice(0, MAX_PER_RAIL) ?? [],
-    [playlist]
-  );
-
-  const frenchShows = useMemo(() => {
-    if (!playlist) return [];
-    return playlist.showsSorted
-      .map((s) => playlist.shows[s])
-      .filter((s) => s.isFrench)
-      .slice(0, MAX_PER_RAIL);
-  }, [playlist]);
-
-  const internationalLive = useMemo(
-    () => playlist?.liveChannels.filter((c) => !c.isFrench).slice(0, MAX_PER_RAIL) ?? [],
-    [playlist]
-  );
-
-  const topGroups = useMemo(() => {
-    if (!playlist) return [];
-    // Annotate each group with its dominant content type so the rail picks a
-    // consistent card style (avoids mixing 16:9 logos with 2:3 posters in the
-    // same rail, which looks awful).
-    return playlist.groupsSorted.slice(0, 12).map((group) => {
-      const channels = playlist.groups[group] ?? [];
-      let movies = 0;
-      let live = 0;
-      let series = 0;
-      for (const c of channels) {
-        if (c.type === "movie") movies++;
-        else if (c.type === "series") series++;
-        else live++;
-      }
-      const dominant: "movie" | "series" | "live" =
-        movies >= series && movies >= live
-          ? "movie"
-          : series >= live
-            ? "series"
-            : "live";
-      return { group, channels, dominant };
-    });
-  }, [playlist]);
-
-  // "Parce que vous avez regardé..." — find the most-watched groups in history,
-  // then surface channels from those groups the user hasn't watched yet.
-  const recommendations = useMemo(() => {
-    if (!playlist || history.length === 0) return [];
-    const groupCount = new Map<string, number>();
-    const watchedIds = new Set(history.map((h) => h.channelId));
-    for (const h of history) {
-      const ch = playlist.channels.find((c) => c.id === h.channelId);
-      if (!ch) continue;
-      groupCount.set(ch.group, (groupCount.get(ch.group) ?? 0) + 1);
-    }
-    const topGroupsByWatch = Array.from(groupCount.entries())
-      .sort((a, b) => b[1] - a[1])
-      .slice(0, 3)
-      .map(([g]) => g);
-
-    return topGroupsByWatch
-      .map((g) => ({
-        group: g,
-        channels: (playlist.groups[g] ?? [])
-          .filter((c) => !watchedIds.has(c.id))
-          .slice(0, MAX_PER_RAIL),
-      }))
-      .filter((r) => r.channels.length > 0);
-  }, [playlist, history]);
+  const favItems = useChannelsByIds(favIds);
+  const histItems = useChannelsByIds(histIds);
 
   if (!m3uUrl) {
     return (
       <EmptyState
         title="Aucune playlist configurée"
-        description="Ajoute le lien M3U que t'a partagé ton ami dans les paramètres pour commencer à regarder."
+        description="Configure DEFAULT_M3U_URL dans les variables d'environnement Vercel, ou ajoute ton lien dans Paramètres."
         ctaLabel="Configurer le lien M3U"
         ctaHref="/settings"
         icon="settings"
@@ -155,15 +73,15 @@ export default function Home() {
     );
   }
 
-  if (loading && !playlist) {
+  if (metaState.loading && !meta) {
     return <FullLoadingScreen progress={progress} />;
   }
 
-  if (error) {
+  if (metaState.error && !meta) {
     return (
       <EmptyState
-        title="Impossible de charger la playlist"
-        description={error}
+        title="Impossible de charger le catalogue"
+        description={metaState.error}
         ctaLabel="Vérifier le lien"
         ctaHref="/settings"
         icon="settings"
@@ -171,126 +89,134 @@ export default function Home() {
     );
   }
 
-  if (!playlist || playlist.channels.length === 0) {
-    return (
-      <EmptyState
-        title="Playlist vide"
-        description="Le fichier M3U ne contient aucune chaîne lisible."
-        ctaLabel="Changer le lien"
-        ctaHref="/settings"
-        icon="settings"
-      />
-    );
-  }
+  if (!meta) return null;
+
+  const featuredItem = frenchLive.data?.items[0] ?? internationalLive.data?.items[0];
 
   return (
     <div className="pb-20">
-      {featuredChannel ? <Hero channel={featuredChannel} /> : null}
+      {featuredItem ? <Hero channel={itemToChannel(featuredItem)} /> : null}
 
       <div className="-mt-24 relative z-10 space-y-2">
-        {/* Big top shortcuts — clear TV / Films / Series separation */}
         <TypeShortcuts
-          liveCount={playlist.liveChannels.length}
-          movieCount={playlist.movieChannels.length}
-          seriesCount={playlist.showsSorted.length}
+          liveCount={meta.totalLive}
+          movieCount={meta.totalMovies}
+          seriesCount={meta.totalShows}
         />
 
-        {/* Continue / favorites — always visible */}
-        {continueWatching.length > 0 ? (
-          <Rail title="Continuer à regarder" channels={continueWatching} />
+        {histItems.data && histItems.data.length > 0 ? (
+          <Rail
+            title="Continuer à regarder"
+            channels={histItems.data.map(itemToChannel)}
+          />
         ) : null}
 
-        {favoriteChannels.length > 0 ? (
-          <Rail title="Mes favoris" channels={favoriteChannels} href="/favorites" />
+        {favItems.data && favItems.data.length > 0 ? (
+          <Rail
+            title="Mes favoris"
+            channels={favItems.data.map(itemToChannel)}
+            href="/favorites"
+          />
         ) : null}
 
-        {recommendations.map((rec) => (
-          <LazySection key={`reco-${rec.group}`}>
-            <Rail
-              title={`Parce que vous regardez ${rec.group}`}
-              channels={rec.channels}
-              href={`/category/${encodeURIComponent(rec.group)}`}
-            />
-          </LazySection>
-        ))}
-
-        {/* Latest releases */}
-        {recentMovies.length > 0 ? (
-          <LazySection>
-            <Rail
-              title="Derniers films ajoutés"
-              channels={recentMovies}
-              href="/movies"
-              posterStyle
-            />
-          </LazySection>
+        {frenchLive.data && frenchLive.data.items.length > 0 ? (
+          <Rail
+            title="🇫🇷 Chaînes françaises en direct"
+            channels={frenchLive.data.items.map(itemToChannel)}
+            href="/live"
+          />
         ) : null}
 
-        {recentShows.length > 0 ? (
-          <LazySection>
-            <ShowRail
-              title="Dernières séries ajoutées"
-              shows={recentShows}
-              href="/series"
-            />
-          </LazySection>
+        {frenchMovies.data && frenchMovies.data.items.length > 0 ? (
+          <Rail
+            title="🇫🇷 Films français"
+            channels={frenchMovies.data.items.map(itemToChannel)}
+            href="/movies"
+            posterStyle
+          />
         ) : null}
 
-        {/* French priority */}
-        {frenchLive.length > 0 ? (
-          <LazySection>
-            <Rail
-              title="🇫🇷 Chaînes françaises en direct"
-              channels={frenchLive}
-              href="/live"
-            />
-          </LazySection>
+        {frenchShows.data && frenchShows.data.items.length > 0 ? (
+          <ShowRail
+            title="🇫🇷 Séries françaises"
+            shows={frenchShows.data.items.map(showItemToGroup)}
+            href="/series"
+          />
         ) : null}
 
-        {frenchMovies.length > 0 ? (
-          <LazySection>
-            <Rail
-              title="🇫🇷 Films français"
-              channels={frenchMovies}
-              href="/movies"
-              posterStyle
-            />
-          </LazySection>
+        {internationalLive.data && internationalLive.data.items.length > 0 ? (
+          <Rail
+            title="Chaînes en direct"
+            channels={internationalLive.data.items.map(itemToChannel)}
+            href="/live"
+          />
         ) : null}
 
-        {frenchShows.length > 0 ? (
-          <LazySection>
-            <ShowRail
-              title="🇫🇷 Séries françaises"
-              shows={frenchShows}
-              href="/series"
-            />
-          </LazySection>
+        {allMovies.data && allMovies.data.items.length > 0 ? (
+          <Rail
+            title="Derniers films ajoutés"
+            channels={allMovies.data.items.map(itemToChannel)}
+            href="/movies"
+            posterStyle
+          />
         ) : null}
 
-        {/* International */}
-        {internationalLive.length > 0 ? (
-          <LazySection>
-            <Rail
-              title="Chaînes internationales en direct"
-              channels={internationalLive}
-              href="/live"
-            />
-          </LazySection>
+        {allShows.data && allShows.data.items.length > 0 ? (
+          <ShowRail
+            title="Séries"
+            shows={allShows.data.items.map(showItemToGroup)}
+            href="/series"
+          />
         ) : null}
 
-        {/* Raw groups for discovery (lazy + capped, uniform style per rail) */}
-        {topGroups.map(({ group, channels, dominant }) => (
-          <LazySection key={group}>
-            <Rail
-              title={group}
-              channels={channels.slice(0, MAX_PER_RAIL)}
-              href={`/category/${encodeURIComponent(group)}`}
-              posterStyle={dominant === "movie"}
-            />
-          </LazySection>
-        ))}
+        <CategoryRailGrid />
       </div>
     </div>
+  );
+}
+
+/**
+ * Show the top categories as clickable cards. Each opens /category/[group]
+ * where the user can browse with full pagination.
+ */
+function CategoryRailGrid() {
+  const meta = usePlaylistStore((s) => s.meta);
+  const groups = meta?.groups.slice(0, 24) ?? [];
+  if (groups.length === 0) return null;
+
+  return (
+    <section className="px-4 md:px-8 py-6">
+      <header className="mb-4 flex items-center gap-2">
+        <Layers size={18} />
+        <h2 className="text-xl font-bold">Toutes les catégories</h2>
+        <Link
+          href="/browse"
+          className="ml-auto text-xs text-muted hover:text-foreground transition-colors"
+        >
+          Voir tout →
+        </Link>
+      </header>
+      <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-3">
+        {groups.map((g) => {
+          const Icon = g.type === "live" ? Radio : g.type === "movie" ? Film : Tv;
+          return (
+            <Link
+              key={g.name}
+              href={`/category/${encodeURIComponent(g.name)}`}
+              className="group relative aspect-[3/2] rounded-xl overflow-hidden border border-border bg-card hover:bg-card-hover transition-colors p-4 flex flex-col justify-between"
+            >
+              <Icon size={18} className="text-muted group-hover:text-foreground transition-colors" />
+              <div>
+                <h3 className="text-sm font-semibold truncate">{g.name}</h3>
+                <p className="text-xs text-muted mt-0.5">
+                  {g.count} {g.count > 1 ? "items" : "item"}
+                  {g.isFrench ? " · 🇫🇷" : ""}
+                </p>
+              </div>
+            </Link>
+          );
+        })}
+      </div>
+    </section>
   );
 }

@@ -1,11 +1,12 @@
 "use client";
 
-import { use, useMemo, useState } from "react";
+import { use, useState } from "react";
 import Link from "next/link";
 import { ArrowLeft, Search } from "lucide-react";
 import { ChannelCard } from "@/components/channel-card";
-import { usePlaylistStore } from "@/lib/store";
 import { EmptyState } from "@/components/empty-state";
+import { useList } from "@/lib/hooks";
+import { itemToChannel } from "@/lib/adapter";
 
 export default function CategoryPage({
   params,
@@ -14,39 +15,21 @@ export default function CategoryPage({
 }) {
   const { group: rawGroup } = use(params);
   const group = decodeURIComponent(rawGroup);
-  const playlist = usePlaylistStore((s) => s.playlist);
   const [query, setQuery] = useState("");
+  const [page, setPage] = useState(1);
 
-  const baseChannels = useMemo(
-    () => playlist?.groups[group] ?? [],
-    [playlist, group]
-  );
+  const { data, loading, error } = useList({
+    group,
+    q: query.trim() || undefined,
+    page,
+    pageSize: 60,
+  });
 
-  const channels = useMemo(() => {
-    if (!query.trim()) return baseChannels;
-    const tokens = query.toLowerCase().split(/\s+/).filter(Boolean);
-    return baseChannels.filter((c) =>
-      tokens.every((t) => c.name.toLowerCase().includes(t))
-    );
-  }, [baseChannels, query]);
-
-  if (!playlist) {
+  if (error) {
     return (
       <EmptyState
-        title="Playlist non chargée"
-        description="Configure ton lien M3U pour explorer les catégories."
-        ctaLabel="Aller aux paramètres"
-        ctaHref="/settings"
-        icon="settings"
-      />
-    );
-  }
-
-  if (baseChannels.length === 0) {
-    return (
-      <EmptyState
-        title="Catégorie vide"
-        description={`Aucune chaîne dans "${group}".`}
+        title="Impossible de charger cette catégorie"
+        description={error}
         ctaLabel="Retour à l'accueil"
         ctaHref="/"
       />
@@ -64,41 +47,55 @@ export default function CategoryPage({
       </Link>
 
       <header className="mb-6">
-        <p className="text-xs uppercase tracking-[0.3em] text-muted mb-2">
-          Catégorie
-        </p>
-        <h1 className="text-3xl md:text-4xl font-black tracking-tight">
-          {group}
-        </h1>
-        <p className="text-sm text-muted mt-2">
-          {baseChannels.length} chaîne{baseChannels.length > 1 ? "s" : ""}
-        </p>
+        <p className="text-xs uppercase tracking-[0.3em] text-muted mb-2">Catégorie</p>
+        <h1 className="text-3xl md:text-4xl font-black tracking-tight">{group}</h1>
+        {data ? (
+          <p className="text-sm text-muted mt-2">
+            {data.total} {data.total > 1 ? "items" : "item"}
+          </p>
+        ) : null}
       </header>
 
-      {baseChannels.length > 12 ? (
+      {data && data.total > 12 ? (
         <div className="relative mb-8 max-w-md">
-          <Search
-            size={16}
-            className="absolute left-3 top-1/2 -translate-y-1/2 text-muted"
-          />
+          <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-muted" />
           <input
             value={query}
-            onChange={(e) => setQuery(e.target.value)}
+            onChange={(e) => {
+              setQuery(e.target.value);
+              setPage(1);
+            }}
             placeholder={`Filtrer dans ${group}…`}
             className="w-full bg-card border border-border rounded-full h-11 pl-9 pr-4 text-sm placeholder:text-muted focus:outline-none focus:border-foreground/40"
           />
         </div>
       ) : null}
 
-      {channels.length === 0 ? (
-        <p className="text-muted">Aucun résultat avec ce filtre.</p>
-      ) : (
-        <div className="grid grid-cols-[repeat(auto-fill,minmax(220px,1fr))] gap-x-4 gap-y-8">
-          {channels.map((ch) => (
-            <ChannelCard key={ch.id} channel={ch} />
-          ))}
-        </div>
-      )}
+      {loading && !data ? (
+        <p className="text-muted">Chargement…</p>
+      ) : data && data.items.length === 0 ? (
+        <p className="text-muted">Aucun résultat.</p>
+      ) : data ? (
+        <>
+          <div className="grid grid-cols-[repeat(auto-fill,minmax(220px,1fr))] gap-x-4 gap-y-8">
+            {data.items.map((ch) => (
+              <ChannelCard key={ch.id} channel={itemToChannel(ch)} />
+            ))}
+          </div>
+
+          {data.total > data.page * data.pageSize ? (
+            <div className="flex justify-center mt-10">
+              <button
+                type="button"
+                onClick={() => setPage((p) => p + 1)}
+                className="h-11 px-6 rounded-full bg-card border border-border hover:bg-card-hover text-sm font-semibold transition-colors"
+              >
+                Page suivante
+              </button>
+            </div>
+          ) : null}
+        </>
+      ) : null}
     </div>
   );
 }

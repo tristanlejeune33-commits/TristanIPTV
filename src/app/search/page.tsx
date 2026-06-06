@@ -1,6 +1,6 @@
 "use client";
 
-import { Suspense, useEffect, useMemo, useRef, useState } from "react";
+import { Suspense, useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { Search, X, Clock, Sparkles, Radio, Film, Tv, Layers } from "lucide-react";
@@ -8,12 +8,8 @@ import { usePlaylistStore } from "@/lib/store";
 import { EmptyState } from "@/components/empty-state";
 import { ChannelCard } from "@/components/channel-card";
 import { ShowCard } from "@/components/show-card";
-import {
-  buildSearchIndex,
-  getSearchSuggestions,
-  groupResults,
-  type GroupedResults,
-} from "@/lib/search";
+import { useSearch } from "@/lib/hooks";
+import { itemToChannel, showItemToGroup } from "@/lib/adapter";
 import { getFallbackGradient } from "@/lib/colors";
 
 const DEBOUNCE_MS = 300;
@@ -23,7 +19,7 @@ function SearchInner() {
   const params = useSearchParams();
   const initialQ = params.get("q") ?? "";
 
-  const playlist = usePlaylistStore((s) => s.playlist);
+  const meta = usePlaylistStore((s) => s.meta);
   const recents = usePlaylistStore((s) => s.recentSearches);
   const addRecent = usePlaylistStore((s) => s.addRecentSearch);
   const clearRecents = usePlaylistStore((s) => s.clearRecentSearches);
@@ -32,19 +28,11 @@ function SearchInner() {
   const [debouncedQuery, setDebouncedQuery] = useState(initialQ);
   const inputRef = useRef<HTMLInputElement>(null);
 
-  // Build the Fuse index once per playlist load — it's a few MB max, fast.
-  const index = useMemo(
-    () => (playlist ? buildSearchIndex(playlist) : null),
-    [playlist]
-  );
-
-  // Debounce the live search
   useEffect(() => {
     const t = window.setTimeout(() => setDebouncedQuery(query), DEBOUNCE_MS);
     return () => window.clearTimeout(t);
   }, [query]);
 
-  // Sync URL — without re-fetching, so refreshes are stable
   useEffect(() => {
     const q = debouncedQuery.trim();
     const current = params.get("q") ?? "";
@@ -53,37 +41,27 @@ function SearchInner() {
         scroll: false,
       });
     }
-    // Persist the query in recents once it stabilizes and is at least 2 chars
-    if (q.length >= 2) {
-      addRecent(q);
-    }
+    if (q.length >= 2) addRecent(q);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [debouncedQuery]);
 
-  // Auto-focus the input on mount
   useEffect(() => {
     inputRef.current?.focus();
   }, []);
 
-  const results: GroupedResults | null = useMemo(() => {
-    if (!index || !debouncedQuery.trim()) return null;
-    const hits = index.search(debouncedQuery.trim()).map((h) => ({
-      item: h.item,
-      score: h.score ?? 1,
-    }));
-    return groupResults(hits, 30);
-  }, [index, debouncedQuery]);
+  const { data: results } = useSearch(debouncedQuery, 30);
 
-  const suggestions = useMemo(
-    () => (playlist ? getSearchSuggestions(playlist) : []),
-    [playlist]
-  );
+  const suggestions =
+    meta?.groups
+      .filter((g) => g.isFrench)
+      .slice(0, 8)
+      .map((g) => g.name.replace(/^[A-Z]{2,4}\|\s*/, "").trim()) ?? [];
 
-  if (!playlist) {
+  if (!meta) {
     return (
       <EmptyState
-        title="Playlist non chargée"
-        description="Configure ton lien M3U pour pouvoir effectuer une recherche."
+        title="Catalogue non chargé"
+        description="Configure ton lien M3U pour effectuer une recherche."
         ctaLabel="Aller aux paramètres"
         ctaHref="/settings"
         icon="settings"
@@ -92,11 +70,10 @@ function SearchInner() {
   }
 
   const isEmpty = !debouncedQuery.trim();
-  const noResults = results !== null && results.total === 0;
+  const noResults = results !== null && results !== undefined && results.total === 0 && !isEmpty;
 
   return (
     <div className="mx-auto max-w-[1600px] px-4 md:px-8 py-8">
-      {/* Search bar */}
       <div className="sticky top-16 z-30 -mx-4 md:-mx-8 px-4 md:px-8 py-3 bg-background/90 backdrop-blur-md border-b border-border">
         <div className="relative max-w-3xl mx-auto">
           <Search
@@ -111,7 +88,6 @@ function SearchInner() {
             placeholder="Films, séries, chaînes, catégories…"
             className="w-full bg-card border border-border rounded-full h-14 pl-12 pr-12 text-base placeholder:text-muted focus:outline-none focus:border-foreground/40"
             autoComplete="off"
-            autoCorrect="off"
             spellCheck={false}
           />
           {query ? (
@@ -128,16 +104,13 @@ function SearchInner() {
             </button>
           ) : null}
         </div>
-
-        {results !== null ? (
+        {results ? (
           <p className="text-xs text-muted text-center mt-2">
-            {results.total} résultat{results.total > 1 ? "s" : ""} pour «{" "}
-            {debouncedQuery} »
+            {results.total} résultat{results.total > 1 ? "s" : ""} pour «&nbsp;{debouncedQuery}&nbsp;»
           </p>
         ) : null}
       </div>
 
-      {/* Empty state: recents + suggestions */}
       {isEmpty ? (
         <div className="mt-10 space-y-10 max-w-3xl mx-auto">
           {recents.length > 0 ? (
@@ -189,109 +162,71 @@ function SearchInner() {
         </div>
       ) : null}
 
-      {/* No-results state */}
       {noResults ? (
         <div className="mt-16 text-center max-w-md mx-auto">
-          <div className="h-16 w-16 mx-auto mb-4 rounded-2xl bg-card border border-border grid place-items-center">
-            <Search size={28} className="text-muted" />
-          </div>
-          <h2 className="text-2xl font-bold mb-2">
-            Aucun résultat pour « {debouncedQuery} »
-          </h2>
+          <h2 className="text-2xl font-bold mb-2">Aucun résultat</h2>
           <p className="text-muted text-sm mb-6">
-            Vérifie l&apos;orthographe ou essaie l&apos;une de ces suggestions.
+            Vérifie l&apos;orthographe ou essaie autre chose.
           </p>
-          <div className="flex flex-wrap justify-center gap-2">
-            {suggestions.map((s) => (
-              <button
-                key={s}
-                type="button"
-                onClick={() => setQuery(s)}
-                className="h-9 px-4 rounded-full bg-card border border-border text-sm hover:bg-card-hover transition-colors"
-              >
-                {s}
-              </button>
-            ))}
-          </div>
         </div>
       ) : null}
 
-      {/* Grouped results */}
-      {results !== null && !noResults ? (
+      {results && !noResults && !isEmpty ? (
         <div className="mt-8 space-y-12">
           {results.live.length > 0 ? (
-            <ResultSection
-              title="Chaînes TV en direct"
-              icon={<Radio size={18} />}
-              count={results.live.length}
-            >
+            <Section title="Chaînes TV en direct" icon={<Radio size={18} />} count={results.live.length}>
               <div className="grid grid-cols-[repeat(auto-fill,minmax(220px,1fr))] gap-x-4 gap-y-8">
                 {results.live.map((c) => (
-                  <ChannelCard key={c.id} channel={c} />
+                  <ChannelCard key={c.id} channel={itemToChannel(c)} />
                 ))}
               </div>
-            </ResultSection>
+            </Section>
           ) : null}
 
           {results.movies.length > 0 ? (
-            <ResultSection
-              title="Films"
-              icon={<Film size={18} />}
-              count={results.movies.length}
-            >
+            <Section title="Films" icon={<Film size={18} />} count={results.movies.length}>
               <div className="grid grid-cols-[repeat(auto-fill,minmax(160px,1fr))] gap-x-3 gap-y-6">
                 {results.movies.map((c) => (
-                  <ChannelCard key={c.id} channel={c} posterStyle />
+                  <ChannelCard key={c.id} channel={itemToChannel(c)} posterStyle />
                 ))}
               </div>
-            </ResultSection>
+            </Section>
           ) : null}
 
           {results.shows.length > 0 ? (
-            <ResultSection
-              title="Séries"
-              icon={<Tv size={18} />}
-              count={results.shows.length}
-            >
+            <Section title="Séries" icon={<Tv size={18} />} count={results.shows.length}>
               <div className="grid grid-cols-[repeat(auto-fill,minmax(180px,1fr))] gap-4">
                 {results.shows.map((s) => (
-                  <ShowCard key={s.showSlug} show={s} />
+                  <ShowCard key={s.showSlug} show={showItemToGroup(s)} />
                 ))}
               </div>
-            </ResultSection>
+            </Section>
           ) : null}
 
           {results.groups.length > 0 ? (
-            <ResultSection
-              title="Catégories"
-              icon={<Layers size={18} />}
-              count={results.groups.length}
-            >
+            <Section title="Catégories" icon={<Layers size={18} />} count={results.groups.length}>
               <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-3">
                 {results.groups.map((g) => (
                   <Link
-                    key={g}
-                    href={`/category/${encodeURIComponent(g)}`}
+                    key={g.name}
+                    href={`/category/${encodeURIComponent(g.name)}`}
                     className="group relative aspect-[5/3] rounded-xl overflow-hidden border border-border hover:border-foreground/30 transition-all"
-                    style={{ background: getFallbackGradient(g) }}
+                    style={{ background: getFallbackGradient(g.name) }}
                   >
                     <div className="absolute inset-0 bg-black/40 group-hover:bg-black/20 transition-colors" />
                     <div className="relative h-full p-3 flex flex-col justify-end">
-                      <Layers
-                        size={16}
-                        className="text-white/70 mb-auto self-end"
-                      />
+                      <Layers size={16} className="text-white/70 mb-auto self-end" />
                       <h3 className="text-sm font-semibold text-white drop-shadow line-clamp-2">
-                        {g}
+                        {g.name}
                       </h3>
                       <p className="text-[10px] text-white/80 mt-0.5">
-                        {playlist.groups[g]?.length ?? 0} chaînes
+                        {g.count} {g.count > 1 ? "chaînes" : "chaîne"}
                       </p>
                     </div>
                   </Link>
                 ))}
               </div>
-            </ResultSection>
+            </Section>
           ) : null}
         </div>
       ) : null}
@@ -299,7 +234,7 @@ function SearchInner() {
   );
 }
 
-function ResultSection({
+function Section({
   title,
   icon,
   count,

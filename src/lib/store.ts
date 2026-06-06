@@ -1,71 +1,71 @@
-"use client";
-
 import { create } from "zustand";
 import { persist } from "zustand/middleware";
-import type { Channel, ParsedPlaylist } from "./m3u-parser";
+import type { CatalogMeta } from "./catalog-client";
 
 export type WatchEntry = {
   channelId: string;
   lastWatchedAt: number;
-  /** seconds — useful for VOD only */
   position?: number;
-  /** total seconds — captured at first play, used to draw progress bars */
   duration?: number;
 };
 
-type PlaylistState = {
-  // Settings
+type State = {
+  /** Currently configured M3U URL. Hydrated from /api/m3u-url on first mount. */
   m3uUrl: string | null;
   setM3uUrl: (url: string | null) => void;
 
-  /** Route every stream through /api/hls to bypass CORS / UA blocks. Default: true. */
-  proxyStreams: boolean;
-  setProxyStreams: (v: boolean) => void;
+  /** Lightweight catalog meta fetched from /api/catalog/meta. */
+  meta: CatalogMeta | null;
+  setMeta: (m: CatalogMeta | null) => void;
 
-  /** Preferred audio language for VOD ("fr" picks French dub, "original" keeps source). */
-  preferredAudio: "fr" | "original";
-  setPreferredAudio: (v: "fr" | "original") => void;
+  loadingMeta: boolean;
+  setLoadingMeta: (v: boolean) => void;
 
-  /** Default subtitle behavior: "off", "auto" (on for VOSTFR), "always-fr". */
-  subtitleMode: "off" | "auto" | "always-fr";
-  setSubtitleMode: (v: "off" | "auto" | "always-fr") => void;
-
-  // Loaded playlist (not persisted — re-fetched on app load)
-  playlist: ParsedPlaylist | null;
-  setPlaylist: (p: ParsedPlaylist | null) => void;
-
-  loadingPlaylist: boolean;
-  setLoadingPlaylist: (v: boolean) => void;
-
-  /** Human-readable progress while the playlist is being fetched/parsed. */
   loadingProgress: string | null;
   setLoadingProgress: (msg: string | null) => void;
 
-  playlistError: string | null;
-  setPlaylistError: (msg: string | null) => void;
+  metaError: string | null;
+  setMetaError: (msg: string | null) => void;
 
-  // Preferences
+  proxyStreams: boolean;
+  setProxyStreams: (v: boolean) => void;
+
+  preferredAudio: "fr" | "original";
+  setPreferredAudio: (v: "fr" | "original") => void;
+
+  subtitleMode: "off" | "auto" | "always-fr";
+  setSubtitleMode: (v: "off" | "auto" | "always-fr") => void;
+
   favorites: string[];
-  toggleFavorite: (id: string) => void;
-  isFavorite: (id: string) => boolean;
+  toggleFavorite: (channelId: string) => void;
 
-  // Continue watching (last 30, sorted by recency)
   watchHistory: WatchEntry[];
   markWatched: (channelId: string, position?: number, duration?: number) => void;
   removeFromHistory: (channelId: string) => void;
   clearHistory: () => void;
 
-  // Recent searches (last 8, sorted by recency)
   recentSearches: string[];
   addRecentSearch: (query: string) => void;
   clearRecentSearches: () => void;
 };
 
-export const usePlaylistStore = create<PlaylistState>()(
+export const usePlaylistStore = create<State>()(
   persist(
-    (set, get) => ({
+    (set) => ({
       m3uUrl: null,
       setM3uUrl: (url) => set({ m3uUrl: url }),
+
+      meta: null,
+      setMeta: (m) => set({ meta: m }),
+
+      loadingMeta: false,
+      setLoadingMeta: (v) => set({ loadingMeta: v }),
+
+      loadingProgress: null,
+      setLoadingProgress: (msg) => set({ loadingProgress: msg }),
+
+      metaError: null,
+      setMetaError: (msg) => set({ metaError: msg }),
 
       proxyStreams: true,
       setProxyStreams: (v) => set({ proxyStreams: v }),
@@ -76,34 +76,19 @@ export const usePlaylistStore = create<PlaylistState>()(
       subtitleMode: "auto",
       setSubtitleMode: (v) => set({ subtitleMode: v }),
 
-      playlist: null,
-      setPlaylist: (p) => set({ playlist: p }),
-
-      loadingPlaylist: false,
-      setLoadingPlaylist: (v) => set({ loadingPlaylist: v }),
-
-      loadingProgress: null,
-      setLoadingProgress: (msg) => set({ loadingProgress: msg }),
-
-      playlistError: null,
-      setPlaylistError: (msg) => set({ playlistError: msg }),
-
       favorites: [],
-      toggleFavorite: (id) =>
+      toggleFavorite: (channelId) =>
         set((s) => ({
-          favorites: s.favorites.includes(id)
-            ? s.favorites.filter((f) => f !== id)
-            : [...s.favorites, id],
+          favorites: s.favorites.includes(channelId)
+            ? s.favorites.filter((id) => id !== channelId)
+            : [channelId, ...s.favorites].slice(0, 500),
         })),
-      isFavorite: (id) => get().favorites.includes(id),
 
       watchHistory: [],
       markWatched: (channelId, position, duration) =>
         set((s) => {
           const prev = s.watchHistory.find((e) => e.channelId === channelId);
-          const filtered = s.watchHistory.filter(
-            (e) => e.channelId !== channelId
-          );
+          const filtered = s.watchHistory.filter((e) => e.channelId !== channelId);
           const next: WatchEntry = {
             channelId,
             lastWatchedAt: Date.now(),
@@ -114,9 +99,7 @@ export const usePlaylistStore = create<PlaylistState>()(
         }),
       removeFromHistory: (channelId) =>
         set((s) => ({
-          watchHistory: s.watchHistory.filter(
-            (e) => e.channelId !== channelId
-          ),
+          watchHistory: s.watchHistory.filter((e) => e.channelId !== channelId),
         })),
       clearHistory: () => set({ watchHistory: [] }),
 
@@ -144,10 +127,3 @@ export const usePlaylistStore = create<PlaylistState>()(
     }
   )
 );
-
-/** Selector helper — get channel by id from currently loaded playlist */
-export function useChannelById(id: string | undefined): Channel | undefined {
-  return usePlaylistStore((s) =>
-    id ? s.playlist?.channels.find((c) => c.id === id) : undefined
-  );
-}
