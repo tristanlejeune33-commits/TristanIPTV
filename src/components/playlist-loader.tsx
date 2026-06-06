@@ -4,6 +4,7 @@ import { useEffect, useRef } from "react";
 import { usePlaylistStore } from "@/lib/store";
 import { parseM3U } from "@/lib/m3u-parser";
 import {
+  clearCachedPlaylist,
   getCachedPlaylist,
   setCachedPlaylist,
 } from "@/lib/playlist-cache";
@@ -82,16 +83,22 @@ export function PlaylistLoader() {
     );
 
     async function load() {
-      // 1. Cache fast path
+      // 1. Cache fast path — ONLY trust non-empty caches. A previous broken
+      //    run (e.g. mis-configured server filter) may have poisoned the IDB
+      //    with a 0-channel playlist; skip it and re-fetch.
       const cached = await getCachedPlaylist(m3uUrl!);
       if (cancelled) return;
-      if (cached) {
+      if (cached && cached.playlist.channels.length > 0) {
         setPlaylist(cached.playlist);
         setError(null);
         setLoading(false);
         setProgress(null);
         window.clearTimeout(timeoutId);
         return;
+      }
+      if (cached) {
+        // Empty cache — actively clear it so future starts don't fight it
+        clearCachedPlaylist(m3uUrl!).catch(() => {});
       }
 
       // 2. No cache — full visible load
@@ -170,12 +177,20 @@ export function PlaylistLoader() {
         const parsed = parseM3U(text);
         if (cancelled) return;
 
+        // Empty playlists are always a configuration error — fail loud
+        // instead of caching them and showing "Playlist vide" forever.
+        if (parsed.channels.length === 0) {
+          throw new Error(
+            "Playlist vide après filtrage. Vérifie les variables d'environnement M3U_EXCLUDE / M3U_INCLUDE / M3U_SERIES_INCLUDE sur Vercel — elles filtrent probablement tout."
+          );
+        }
+
         setProgress(
           `${parsed.channels.length} chaînes · ${parsed.groupsSorted.length} catégories`
         );
         setPlaylist(parsed);
 
-        // Persist for future instant boots — fire-and-forget
+        // Persist for future instant boots — fire-and-forget, only when non-empty
         setCachedPlaylist(m3uUrl!, parsed).catch(() => {});
       } catch (err) {
         if (cancelled) return;
