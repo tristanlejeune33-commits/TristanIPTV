@@ -1,17 +1,14 @@
 "use client";
 
 import { useEffect, useRef } from "react";
-import { toast } from "sonner";
 import { usePlaylistStore } from "@/lib/store";
 import { parseM3U } from "@/lib/m3u-parser";
 import {
-  formatCacheAge,
   getCachedPlaylist,
   setCachedPlaylist,
 } from "@/lib/playlist-cache";
 
 const FETCH_TIMEOUT_MS = 120_000;
-const STALE_AFTER_MS = 12 * 60 * 60 * 1000; // 12h — background refresh hint
 
 function fmtMb(bytes: number): string {
   return `${(bytes / 1024 / 1024).toFixed(1)} Mo`;
@@ -24,16 +21,15 @@ function nextTick(): Promise<void> {
 /**
  * Boot the playlist for the app:
  *
- *   1. Hydrate the M3U URL from the server-side store (the env-var default
- *      means a fresh device opens with the right URL pre-filled).
- *   2. Read the IndexedDB cache for that URL — if present, paint the catalog
- *      INSTANTLY (no network, no parsing).
- *   3. In the background, refetch + reparse the M3U so the next session has
- *      fresh data. A silent toast lets the user know when it succeeded.
+ *   1. Hydrate the M3U URL from the server-side store on first mount.
+ *   2. On URL change: try the IndexedDB cache. If hit, paint the catalog
+ *      instantly and stop. If miss, run one full visible fetch and save
+ *      the result.
  *
- * The fast path means TV browsers (Chromecast / Fire TV) never sit on the
- * loading screen on subsequent opens — they always have the catalog ready,
- * even right after a cold start.
+ * No automatic background refresh — the previous "refresh after 12h" logic
+ * could re-fire in edge cases on TV browsers, producing the "downloads in
+ * a loop" bug. The user can refresh explicitly via /settings → Réessayer
+ * (which clears the cache for that URL and re-runs the loader).
  */
 export function PlaylistLoader() {
   const m3uUrl = usePlaylistStore((s) => s.m3uUrl);
@@ -62,12 +58,21 @@ export function PlaylistLoader() {
     })();
   }, [setM3uUrl]);
 
+  // Track which URL is currently being processed so React Strict Mode (dev) or
+  // any double-mount can't kick off two concurrent loads of the same URL.
+  const activeUrlRef = useRef<string | null>(null);
+
   useEffect(() => {
     if (!m3uUrl) {
       setPlaylist(null);
       setProgress(null);
+      activeUrlRef.current = null;
       return;
     }
+
+    // Already loading or loaded this exact URL on this mount — bail.
+    if (activeUrlRef.current === m3uUrl) return;
+    activeUrlRef.current = m3uUrl;
 
     let cancelled = false;
     const controller = new AbortController();
@@ -76,22 +81,24 @@ export function PlaylistLoader() {
       FETCH_TIMEOUT_MS
     );
 
-    async function bootFromCache(): Promise<boolean> {
+    async function load() {
+      // 1. Cache fast path
       const cached = await getCachedPlaylist(m3uUrl!);
-      if (cancelled || !cached) return false;
-      setPlaylist(cached.playlist);
-      setError(null);
-      setLoading(false);
-      setProgress(null);
-      return true;
-    }
-
-    async function fetchFresh(silent: boolean): Promise<void> {
-      if (!silent) {
-        setLoading(true);
+      if (cancelled) return;
+      if (cached) {
+        setPlaylist(cached.playlist);
         setError(null);
-        setProgress("Connexion au serveur…");
+        setLoading(false);
+        setProgress(null);
+        window.clearTimeout(timeoutId);
+        return;
       }
+
+      // 2. No cache — full visible load
+      setLoading(true);
+      setError(null);
+      setProgress("Connexion au serveur…");
+
       let text: string;
       try {
         const proxied = `/api/m3u?url=${encodeURIComponent(m3uUrl!)}`;
@@ -121,7 +128,7 @@ export function PlaylistLoader() {
               }
               chunks.push(value);
               received += value.length;
-              if (!silent && Date.now() - lastUpdate > 250) {
+              if (Date.now() - lastUpdate > 250) {
                 lastUpdate = Date.now();
                 setProgress(
                   contentLength > 0
@@ -132,8 +139,7 @@ export function PlaylistLoader() {
                 );
               }
             }
-            if (!silent)
-              setProgress(`Téléchargement terminé (${fmtMb(received)})`);
+            setProgress(`Téléchargement terminé (${fmtMb(received)})`);
             await nextTick();
             const blob = new Blob(chunks as unknown as BlobPart[]);
             text = await blob.text();
@@ -158,29 +164,19 @@ export function PlaylistLoader() {
           );
         }
 
-        if (!silent) setProgress("Analyse de la playlist…");
+        setProgress("Analyse de la playlist…");
         await nextTick();
 
         const parsed = parseM3U(text);
         if (cancelled) return;
 
-        if (!silent) {
-          setProgress(
-            `${parsed.channels.length} chaînes · ${parsed.groupsSorted.length} catégories`
-          );
-        }
+        setProgress(
+          `${parsed.channels.length} chaînes · ${parsed.groupsSorted.length} catégories`
+        );
         setPlaylist(parsed);
-        setError(null);
 
-        // Persist to cache for the next cold start
+        // Persist for future instant boots — fire-and-forget
         setCachedPlaylist(m3uUrl!, parsed).catch(() => {});
-
-        if (silent) {
-          toast.success("Catalogue mis à jour", {
-            description: `${parsed.channels.length} chaînes · ${parsed.groupsSorted.length} catégories`,
-            duration: 2500,
-          });
-        }
       } catch (err) {
         if (cancelled) return;
         const isAbort =
@@ -190,25 +186,15 @@ export function PlaylistLoader() {
           : err instanceof Error
             ? err.message
             : "Erreur inconnue";
-
-        if (silent) {
-          // Don't disrupt the user — they're already watching the cached
-          // catalog. Just log a soft notice.
-          toast.warning("Mise à jour échouée", {
-            description: msg,
-            duration: 3000,
-          });
-        } else {
-          setError(
-            msg.toLowerCase().includes("load failed") ||
-              msg.toLowerCase().includes("network")
-              ? `${msg}. Vérifie ta connexion WiFi et réessaie.`
-              : msg
-          );
-          setPlaylist(null);
-        }
+        setError(
+          msg.toLowerCase().includes("load failed") ||
+            msg.toLowerCase().includes("network")
+            ? `${msg}. Vérifie ta connexion WiFi et réessaie.`
+            : msg
+        );
+        setPlaylist(null);
       } finally {
-        if (!cancelled && !silent) {
+        if (!cancelled) {
           setLoading(false);
           setTimeout(() => {
             if (!cancelled) setProgress(null);
@@ -217,24 +203,7 @@ export function PlaylistLoader() {
       }
     }
 
-    (async () => {
-      const cached = await getCachedPlaylist(m3uUrl!);
-      const hasCache = await bootFromCache();
-      if (hasCache && cached) {
-        // Got the fast path. Now refresh in background only if the cache
-        // is stale enough to be worth the work.
-        const stale = Date.now() - cached.timestamp > STALE_AFTER_MS;
-        if (stale) {
-          toast(`Mise à jour du catalogue (${formatCacheAge(cached.timestamp)})`, {
-            duration: 2000,
-          });
-          fetchFresh(true);
-        }
-      } else {
-        // Cold start with no cache — full visible load
-        await fetchFresh(false);
-      }
-    })();
+    load();
 
     return () => {
       cancelled = true;

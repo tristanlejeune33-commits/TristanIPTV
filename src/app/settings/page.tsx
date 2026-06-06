@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { Loader2, Save, Trash2, ExternalLink, Shield, Subtitles, Languages } from "lucide-react";
 import { toast } from "sonner";
 import { usePlaylistStore } from "@/lib/store";
+import { clearCachedPlaylist } from "@/lib/playlist-cache";
 
 export default function SettingsPage() {
   const router = useRouter();
@@ -53,12 +54,16 @@ export default function SettingsPage() {
     });
   }
 
-  function retry() {
+  async function retry() {
     if (!currentUrl) return;
+    // Wipe the cached parsed playlist so the loader pulls a fresh M3U
+    await clearCachedPlaylist(currentUrl);
     // Force a re-run of the loader by toggling the URL
     setM3uUrl(null);
     setTimeout(() => setM3uUrl(currentUrl), 50);
-    toast("Nouvelle tentative…");
+    toast("Nouvelle tentative…", {
+      description: "Cache vidé, téléchargement frais en cours",
+    });
   }
 
   async function clearAll() {
