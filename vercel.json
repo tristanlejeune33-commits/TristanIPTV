@@ -12,8 +12,17 @@
     },
     "src/app/api/img/route.ts": {
       "maxDuration": 30
+    },
+    "src/app/api/cron/warm/route.ts": {
+      "maxDuration": 60
     }
   },
+  "crons": [
+    {
+      "path": "/api/cron/warm",
+      "schedule": "0 4 * * *"
+    }
+  ],
   "headers": [
     {
       "source": "/manifest.webmanifest",

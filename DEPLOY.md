@@ -152,6 +152,63 @@ C'est la meilleure approche pour un usage perso multi-appareils.
 
 ---
 
+## 4-ter. Pré-chargement automatique du M3U (cron)
+
+Le proxy `/api/m3u` est déjà mis en cache au niveau du CDN Vercel pendant 1 heure (`s-maxage=3600`). Mais le tout premier visiteur après le déploiement (ou après expiration du cache) doit attendre que le serveur télécharge le M3U depuis l'IPTV.
+
+**Solution** : un **cron job** qui appelle `/api/cron/warm` pour pré-charger le cache à intervalles réguliers. Comme ça, n'importe quel appareil qui ouvre le site obtient le M3U **instantanément** depuis le CDN, jamais depuis l'IPTV upstream.
+
+### Cron Vercel intégré (gratuit, daily)
+
+Déjà configuré dans `vercel.json` :
+```json
+{
+  "crons": [
+    { "path": "/api/cron/warm", "schedule": "0 4 * * *" }
+  ]
+}
+```
+
+→ Chaque jour à 4h UTC (= 5h heure de Paris), Vercel appelle automatiquement `/api/cron/warm`, qui télécharge le M3U et populate le cache edge.
+
+**Limite Hobby (gratuit)** : 1 exécution par jour max. Suffisant pour la plupart des cas.
+
+### Cron externe plus fréquent (gratuit, hourly+)
+
+Pour rafraîchir plus souvent que daily (utile si ta playlist change fréquemment), utilise un cron externe :
+
+**[cron-job.org](https://cron-job.org)** (gratuit, illimité) :
+1. Crée un compte
+2. **Create cronjob** → URL : `https://ton-projet.vercel.app/api/cron/warm`
+3. Schedule : `Every 1 hour` (ou tout autre intervalle)
+4. Save
+
+Tu peux protéger l'endpoint en définissant `CRON_SECRET` dans les env Vercel — dans ce cas le cron externe doit envoyer `Authorization: Bearer <secret>` (configurable dans cron-job.org → Advanced).
+
+### Test manuel
+
+Tu peux déclencher le warm manuellement depuis ton navigateur (sans secret par défaut) :
+```
+https://ton-projet.vercel.app/api/cron/warm
+```
+
+Réponse attendue :
+```json
+{
+  "ok": true,
+  "status": 200,
+  "bytes": 8123456,
+  "sizeMb": "7.75",
+  "durationMs": 4521,
+  "cachedAt": "2025-...",
+  "note": "Cache edge Vercel rafraîchi"
+}
+```
+
+Pour les visiteurs suivants, le M3U sera servi en quelques ms depuis le CDN.
+
+---
+
 ## 5. Si tu veux le proxy live qui marche (option Railway)
 
 Pour avoir Live TV via proxy sans limite :
