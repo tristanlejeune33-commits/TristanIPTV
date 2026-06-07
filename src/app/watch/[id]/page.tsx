@@ -1,6 +1,6 @@
 "use client";
 
-import { use, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { Suspense, use, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { Heart, SkipBack, SkipForward, RotateCw, Play, Home as HomeIcon } from "lucide-react";
@@ -22,7 +22,27 @@ function formatTime(seconds: number): string {
 
 const AUTOPLAY_COUNTDOWN_SECONDS = 7;
 
-export default function WatchPage({
+export default function WatchPageWrapper({
+  params,
+}: {
+  params: Promise<{ id: string }>;
+}) {
+  // useSearchParams() in this page requires a Suspense boundary on Next.js 15+
+  // otherwise the route 500s during the build / first SSR pass.
+  return (
+    <Suspense
+      fallback={
+        <div className="fixed inset-0 bg-black grid place-items-center">
+          <div className="h-10 w-10 border-4 border-border border-t-[var(--accent)] rounded-full animate-spin" />
+        </div>
+      }
+    >
+      <WatchPage params={params} />
+    </Suspense>
+  );
+}
+
+function WatchPage({
   params,
 }: {
   params: Promise<{ id: string }>;
