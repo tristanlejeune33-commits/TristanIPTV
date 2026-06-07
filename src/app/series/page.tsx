@@ -1,19 +1,32 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Search } from "lucide-react";
 import { ShowCard } from "@/components/show-card";
 import { EmptyState } from "@/components/empty-state";
 import { useShows } from "@/lib/hooks";
 import { showItemToGroup } from "@/lib/adapter";
 
+const DEBOUNCE_MS = 300;
+
 export default function SeriesPage() {
   const [query, setQuery] = useState("");
+  const [debouncedQuery, setDebouncedQuery] = useState("");
   const [frOnly, setFrOnly] = useState(false);
   const [page, setPage] = useState(1);
 
+  // Debounce the search input so we don't hammer /api/catalog/shows on every
+  // keystroke (cold-start cost on Vercel = 2-5s per call).
+  useEffect(() => {
+    const t = window.setTimeout(() => {
+      setDebouncedQuery(query);
+      setPage(1);
+    }, DEBOUNCE_MS);
+    return () => window.clearTimeout(t);
+  }, [query]);
+
   const { data, loading, error } = useShows({
-    q: query.trim() || undefined,
+    q: debouncedQuery.trim() || undefined,
     french: frOnly || undefined,
     page,
     pageSize: 48,
@@ -44,10 +57,7 @@ export default function SeriesPage() {
           <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-muted" />
           <input
             value={query}
-            onChange={(e) => {
-              setQuery(e.target.value);
-              setPage(1);
-            }}
+            onChange={(e) => setQuery(e.target.value)}
             placeholder="Rechercher une série…"
             className="w-full bg-card border border-border rounded-full h-11 pl-9 pr-4 text-sm placeholder:text-muted focus:outline-none focus:border-foreground/40"
           />
@@ -70,7 +80,15 @@ export default function SeriesPage() {
       </div>
 
       {loading && !data ? (
-        <p className="text-muted">Chargement…</p>
+        <div className="grid grid-cols-[repeat(auto-fill,minmax(180px,1fr))] gap-4">
+          {Array.from({ length: 12 }).map((_, i) => (
+            <div
+              key={i}
+              className="aspect-[2/3] rounded-xl bg-card border border-border animate-pulse"
+              style={{ animationDelay: `${i * 40}ms` }}
+            />
+          ))}
+        </div>
       ) : data && data.items.length === 0 ? (
         <p className="text-muted">Aucune série correspondante.</p>
       ) : data ? (
@@ -80,6 +98,9 @@ export default function SeriesPage() {
               <ShowCard key={s.showSlug} show={showItemToGroup(s)} />
             ))}
           </div>
+          {loading ? (
+            <p className="text-center text-xs text-muted mt-4">Mise à jour…</p>
+          ) : null}
 
           {data.total > data.page * data.pageSize ? (
             <div className="flex justify-center mt-10">
