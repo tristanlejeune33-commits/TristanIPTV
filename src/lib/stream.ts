@@ -8,7 +8,13 @@ export function transcodedStreamUrl(
   config: { baseUrl: string | null; secret: string | null } | null
 ): string | null {
   if (!config?.baseUrl) return null;
-  const base = config.baseUrl.replace(/\/+$/, "");
+  // Be defensive: env vars are easy to mistype — accept the bare hostname
+  // (`tristaniptv-production.up.railway.app`) and auto-prepend `https://`.
+  // Web Worker `fetch` (used by mpegts.js) refuses scheme-less URLs.
+  let base = config.baseUrl.trim().replace(/\/+$/, "");
+  if (!/^https?:\/\//i.test(base)) {
+    base = `https://${base}`;
+  }
   const params = new URLSearchParams({ url: originalUrl });
   if (config.secret) params.set("secret", config.secret);
   return `${base}/transcode?${params.toString()}`;

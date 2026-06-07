@@ -12,8 +12,22 @@ import { NextResponse } from "next/server";
  */
 export const runtime = "nodejs";
 
+/** Auto-prepend `https://` and strip trailing slashes so the env var is
+ *  forgiving of common typos (`tristaniptv.up.railway.app/` etc.). */
+function normalizeBaseUrl(raw: string | undefined): string | null {
+  const trimmed = raw?.trim();
+  if (!trimmed) return null;
+  let v = trimmed.replace(/\/+$/, "");
+  if (!/^https?:\/\//i.test(v)) v = `https://${v}`;
+  try {
+    return new URL(v).toString().replace(/\/+$/, "");
+  } catch {
+    return null;
+  }
+}
+
 export async function GET() {
-  const baseUrl = process.env.TRANSCODER_URL?.trim() ?? null;
+  const baseUrl = normalizeBaseUrl(process.env.TRANSCODER_URL);
   return NextResponse.json(
     {
       enabled: Boolean(baseUrl),
