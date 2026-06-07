@@ -9,12 +9,17 @@ import type { Channel } from "@/lib/m3u-parser";
 /**
  * Channel thumbnail with a robust fallback chain:
  *
- *   1. Try the original logo URL directly (cheapest path — browser may have
- *      it cached, or the host might allow direct hotlinking)
- *   2. On error, retry through our /api/img proxy (bypasses Referer/UA
- *      hotlink protection that 90% of IPTV providers enable)
- *   3. On second error, render a deterministic gradient + initials + a tiny
- *      content-type icon — branded, not a broken image
+ *   1. Try /api/img proxy (Vercel handles caching + bypasses Referer/UA
+ *      hotlink protection — and crucially, doesn't burn Chrome's ~6
+ *      per-host socket limit on the IPTV image CDN, which was causing
+ *      ERR_CONNECTION_CLOSED cascades that crashed the page when 50+
+ *      thumbnails tried to load at once).
+ *   2. On error, render a deterministic gradient + initials + a tiny
+ *      content-type icon — branded, not a broken image.
+ *
+ * We intentionally DON'T try the direct upstream first anymore. Going via
+ * Vercel adds maybe 50ms on cache miss but is dramatically more reliable
+ * for big playlists.
  */
 export function ChannelThumbnail({
   channel,
@@ -23,29 +28,23 @@ export function ChannelThumbnail({
   channel: Channel;
   className?: string;
 }) {
-  const [stage, setStage] = useState<"direct" | "proxy" | "fallback">(
-    channel.logo ? "direct" : "fallback"
-  );
+  const [failed, setFailed] = useState(false);
 
-  if (stage !== "fallback" && channel.logo) {
-    const src = stage === "direct" ? channel.logo : proxiedImageUrl(channel.logo);
+  if (channel.logo && !failed) {
     return (
       // eslint-disable-next-line @next/next/no-img-element
       <img
-        src={src}
+        src={proxiedImageUrl(channel.logo)}
         alt={channel.displayName}
         referrerPolicy="no-referrer"
         loading="lazy"
         decoding="async"
         className={`object-contain p-3 bg-gradient-to-br from-card to-[#0d0d0d] ${className}`}
-        onError={() => {
-          setStage((s) => (s === "direct" ? "proxy" : "fallback"));
-        }}
+        onError={() => setFailed(true)}
       />
     );
   }
 
-  // Final fallback: branded gradient + cleaned-name initials + content icon
   const TypeIcon =
     channel.type === "movie" ? Film : channel.type === "series" ? Tv : Radio;
 

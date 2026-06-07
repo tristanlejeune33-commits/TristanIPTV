@@ -25,9 +25,13 @@ const TRANSPARENT_PNG = Buffer.from(
   "base64"
 );
 
-function emptyImage(status: number): Response {
+function emptyImage(): Response {
+  // Always 200 — the browser shouldn't log a console warning for an image
+  // that the upstream couldn't serve. The component already swaps in a
+  // gradient fallback via onError, so a 200 transparent PNG is the friendliest
+  // way to short-circuit it.
   return new Response(TRANSPARENT_PNG as unknown as BodyInit, {
-    status,
+    status: 200,
     headers: {
       "Content-Type": "image/png",
       "Cache-Control": "public, max-age=3600",
@@ -38,17 +42,17 @@ function emptyImage(status: number): Response {
 
 export async function GET(req: NextRequest) {
   const url = req.nextUrl.searchParams.get("url");
-  if (!url) return emptyImage(400);
+  if (!url) return emptyImage();
 
   let target: URL;
   try {
     target = new URL(url);
   } catch {
-    return emptyImage(400);
+    return emptyImage();
   }
 
   if (!/^https?:$/.test(target.protocol)) {
-    return emptyImage(400);
+    return emptyImage();
   }
 
   try {
@@ -64,7 +68,7 @@ export async function GET(req: NextRequest) {
     if (!upstream.ok) {
       // Don't propagate 4xx/5xx as image errors — return transparent so the
       // UI shows the gradient fallback cleanly instead of a broken icon.
-      return emptyImage(upstream.status);
+      return emptyImage();
     }
 
     const contentType = upstream.headers.get("content-type") ?? "image/png";
@@ -78,6 +82,6 @@ export async function GET(req: NextRequest) {
       },
     });
   } catch {
-    return emptyImage(502);
+    return emptyImage();
   }
 }
