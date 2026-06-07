@@ -30,6 +30,10 @@ type State = {
   proxyStreams: boolean;
   setProxyStreams: (v: boolean) => void;
 
+  /** Route live TV through the ffmpeg transcoder so HEVC/AC-3 channels play. */
+  transcodeLive: boolean;
+  setTranscodeLive: (v: boolean) => void;
+
   preferredAudio: "fr" | "original";
   setPreferredAudio: (v: "fr" | "original") => void;
 
@@ -69,6 +73,9 @@ export const usePlaylistStore = create<State>()(
 
       proxyStreams: true,
       setProxyStreams: (v) => set({ proxyStreams: v }),
+
+      transcodeLive: false,
+      setTranscodeLive: (v) => set({ transcodeLive: v }),
 
       preferredAudio: "fr",
       setPreferredAudio: (v) => set({ preferredAudio: v }),
@@ -118,6 +125,7 @@ export const usePlaylistStore = create<State>()(
       partialize: (s) => ({
         m3uUrl: s.m3uUrl,
         proxyStreams: s.proxyStreams,
+        transcodeLive: s.transcodeLive,
         preferredAudio: s.preferredAudio,
         subtitleMode: s.subtitleMode,
         favorites: s.favorites,

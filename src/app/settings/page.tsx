@@ -2,7 +2,16 @@
 
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
-import { Loader2, Save, Trash2, ExternalLink, Shield, Subtitles, Languages } from "lucide-react";
+import {
+  Loader2,
+  Save,
+  Trash2,
+  ExternalLink,
+  Shield,
+  Subtitles,
+  Languages,
+  Zap,
+} from "lucide-react";
 import { toast } from "sonner";
 import { usePlaylistStore } from "@/lib/store";
 import { resetCatalogCache } from "@/lib/catalog-client";
@@ -19,6 +28,26 @@ export default function SettingsPage() {
   const history = usePlaylistStore((s) => s.watchHistory);
   const proxyStreams = usePlaylistStore((s) => s.proxyStreams);
   const setProxyStreams = usePlaylistStore((s) => s.setProxyStreams);
+  const transcodeLive = usePlaylistStore((s) => s.transcodeLive);
+  const setTranscodeLive = usePlaylistStore((s) => s.setTranscodeLive);
+  const [transcoderEnabled, setTranscoderEnabled] = useState<boolean | null>(null);
+  const [transcoderBaseUrl, setTranscoderBaseUrl] = useState<string | null>(null);
+  useEffect(() => {
+    let cancelled = false;
+    fetch("/api/transcode-config", { cache: "no-store" })
+      .then((r) => (r.ok ? r.json() : null))
+      .then((data: { enabled: boolean; baseUrl: string | null } | null) => {
+        if (cancelled || !data) return;
+        setTranscoderEnabled(data.enabled);
+        setTranscoderBaseUrl(data.baseUrl);
+      })
+      .catch(() => {
+        if (!cancelled) setTranscoderEnabled(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
   const progress = usePlaylistStore((s) => s.loadingProgress);
   const preferredAudio = usePlaylistStore((s) => s.preferredAudio);
   const setPreferredAudio = usePlaylistStore((s) => s.setPreferredAudio);
@@ -208,6 +237,63 @@ export default function SettingsPage() {
             </p>
           </div>
         </label>
+      </section>
+
+      <section className="bg-card border border-border rounded-2xl p-6 md:p-8 mb-8">
+        <h2 className="text-lg font-semibold mb-2 flex items-center gap-2">
+          <Zap size={18} /> Transcodeur Live TV (HEVC / AC-3)
+        </h2>
+        <p className="text-sm text-muted mb-4">
+          Beaucoup de chaînes live sont en H.265 (HEVC) avec son AC-3 / Dolby —
+          des codecs que <strong>Chrome et Firefox refusent de lire</strong>.
+          Solution : un petit service ffmpeg sur Railway qui ré-encode à la
+          volée en H.264 + AAC (lisible partout). Voir{" "}
+          <code className="text-[var(--accent)]">transcoder/README.md</code>{" "}
+          pour le déploiement.
+        </p>
+
+        {transcoderEnabled === null ? (
+          <div className="text-sm text-muted">Vérification…</div>
+        ) : transcoderEnabled ? (
+          <>
+            <div className="text-xs text-muted mb-3">
+              Transcodeur détecté :{" "}
+              <code className="text-[var(--accent)]">{transcoderBaseUrl}</code>
+            </div>
+            <label className="flex items-start gap-3 p-4 rounded-lg border border-border bg-background cursor-pointer hover:bg-card-hover transition-colors">
+              <input
+                type="checkbox"
+                checked={transcodeLive}
+                onChange={(e) => {
+                  setTranscodeLive(e.target.checked);
+                  toast(
+                    e.target.checked
+                      ? "Transcodage Live TV activé"
+                      : "Transcodage Live TV désactivé"
+                  );
+                }}
+                className="mt-1 h-4 w-4 accent-[var(--accent)]"
+              />
+              <div className="flex-1">
+                <p className="text-sm font-semibold">
+                  Transcoder les chaînes live (recommandé si une chaîne refuse
+                  de démarrer)
+                </p>
+                <p className="text-xs text-muted mt-1">
+                  Ajoute 3 à 6 secondes de latence mais permet de regarder
+                  toutes les chaînes depuis Chrome / Firefox / iPhone. À
+                  désactiver pour les chaînes déjà en H.264 (latence inutile).
+                </p>
+              </div>
+            </label>
+          </>
+        ) : (
+          <div className="text-sm rounded-lg border border-amber-500/30 bg-amber-500/5 p-4 text-amber-300">
+            Aucun transcodeur configuré. Déploie le service Railway puis ajoute
+            la variable <code>TRANSCODER_URL</code> sur Vercel. Voir{" "}
+            <code className="text-[var(--accent)]">transcoder/README.md</code>.
+          </div>
+        )}
       </section>
 
       <section className="bg-card border border-border rounded-2xl p-6 md:p-8 mb-8">

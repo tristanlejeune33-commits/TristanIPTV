@@ -1,4 +1,20 @@
 /**
+ * Build the URL to use when handing a stream off to the ffmpeg transcoder
+ * (deployed separately, typically on Railway). Returns null if no transcoder
+ * is configured — the caller should fall back to the regular HLS/mpegts path.
+ */
+export function transcodedStreamUrl(
+  originalUrl: string,
+  config: { baseUrl: string | null; secret: string | null } | null
+): string | null {
+  if (!config?.baseUrl) return null;
+  const base = config.baseUrl.replace(/\/+$/, "");
+  const params = new URLSearchParams({ url: originalUrl });
+  if (config.secret) params.set("secret", config.secret);
+  return `${base}/transcode?${params.toString()}`;
+}
+
+/**
  * Wrap a remote image URL through our same-origin proxy so the browser
  * doesn't get blocked by Referer/UA hotlink protection.
  */

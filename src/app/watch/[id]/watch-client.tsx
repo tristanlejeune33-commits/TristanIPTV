@@ -8,8 +8,15 @@ import { toast } from "sonner";
 import { Player } from "@/components/player";
 import { usePlaylistStore } from "@/lib/store";
 import { EmptyState } from "@/components/empty-state";
-import { detectStreamType, proxiedStreamUrl, type StreamType } from "@/lib/stream";
+import {
+  detectStreamType,
+  proxiedStreamUrl,
+  transcodedStreamUrl,
+  type StreamType,
+} from "@/lib/stream";
 import { useShow, useStream } from "@/lib/hooks";
+
+type TranscodeConfig = { enabled: boolean; baseUrl: string | null; secret: string | null };
 
 function formatTime(seconds: number): string {
   if (!Number.isFinite(seconds) || seconds < 0) return "0:00";
@@ -31,8 +38,24 @@ export default function WatchClient({ id }: { id: string }) {
   const markWatched = usePlaylistStore((s) => s.markWatched);
   const history = usePlaylistStore((s) => s.watchHistory);
   const proxyStreams = usePlaylistStore((s) => s.proxyStreams);
+  const transcodeLive = usePlaylistStore((s) => s.transcodeLive);
   const globalAudio = usePlaylistStore((s) => s.preferredAudio);
   const globalSubs = usePlaylistStore((s) => s.subtitleMode);
+
+  // Pull transcoder config once on mount (small/cached endpoint)
+  const [transcodeConfig, setTranscodeConfig] = useState<TranscodeConfig | null>(null);
+  useEffect(() => {
+    let cancelled = false;
+    fetch("/api/transcode-config", { cache: "no-store" })
+      .then((r) => (r.ok ? r.json() : null))
+      .then((data: TranscodeConfig | null) => {
+        if (!cancelled) setTranscodeConfig(data);
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   const audioParam = searchParams.get("audio");
   const subsParam = searchParams.get("subs");
@@ -171,7 +194,27 @@ export default function WatchClient({ id }: { id: string }) {
     );
   }
 
-  const streamType: StreamType = detectStreamType(channel.url, !isVod);
+  // Pick the source URL:
+  //   1. Transcoder if the user enabled it + a transcoder is configured + it's
+  //      a live channel (HEVC/AC-3 are mostly a live IPTV problem)
+  //   2. Otherwise our /api/hls proxy (CORS/UA bypass)
+  //   3. Otherwise raw upstream
+  const useTranscoder =
+    transcodeLive &&
+    !isVod &&
+    transcodeConfig?.enabled &&
+    Boolean(transcodeConfig?.baseUrl);
+  const transcodedSrc = useTranscoder
+    ? transcodedStreamUrl(channel.url, transcodeConfig)
+    : null;
+  const finalSrc =
+    transcodedSrc ??
+    (proxyStreams ? proxiedStreamUrl(channel.url) : channel.url);
+  // Transcoder output is always MPEG-TS (regardless of upstream) → tell the
+  // player to use the mpegts.js engine.
+  const streamType: StreamType = useTranscoder
+    ? "mpegts"
+    : detectStreamType(channel.url, !isVod);
   const playerTitle = channel.displayName;
   const seasonLabel = channel.season ? `S${String(channel.season).padStart(2, "0")}` : "";
   const epLabel = channel.episode ? `E${String(channel.episode).padStart(2, "0")}` : "";
@@ -256,8 +299,8 @@ export default function WatchClient({ id }: { id: string }) {
 
         {!needsResumePrompt || resumeChoice !== null ? (
           <Player
-            key={`${channel.id}-${resumeChoice ?? "auto"}`}
-            src={proxyStreams ? proxiedStreamUrl(channel.url) : channel.url}
+            key={`${channel.id}-${resumeChoice ?? "auto"}-${useTranscoder ? "t" : "n"}`}
+            src={finalSrc}
             streamType={streamType}
             codecHint={`${channel.name} ${channel.group}`}
             langVariant={channel.langVariant as never}
