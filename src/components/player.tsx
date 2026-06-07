@@ -171,7 +171,17 @@ export function Player({
   }, [codecHint]);
   const errorLooksCodec = useMemo(() => {
     if (!displayedError) return false;
-    return /media|decode|format|codec|appendBuffer/i.test(displayedError);
+    return /media|decode|format|codec|appendBuffer|addSourceBuffer|unsupported/i.test(
+      displayedError
+    );
+  }, [displayedError]);
+  // AC-3 / E-AC-3 (Dolby Digital) is used by most live IPTV channels but
+  // Chrome / Firefox refuse it without OS-level licensing. Detect from the
+  // actual error string (mpegts.js / MSE produce "audio/mp4;codecs=ac-3
+  // unsupported" or similar).
+  const showAc3Hint = useMemo(() => {
+    if (!displayedError) return false;
+    return /ac-?3|e-?ac-?3|dolby/i.test(displayedError);
   }, [displayedError]);
   const showHevcHint = hevcInName && errorLooksCodec;
 
@@ -830,6 +840,25 @@ export function Player({
                   ou <code className="px-1 bg-black/40 rounded">SD/HD</code>{" "}
                   classique — elles marchent partout.
                 </p>
+              </div>
+            ) : null}
+
+            {showAc3Hint ? (
+              <div className="text-left text-sm bg-amber-500/10 border border-amber-500/30 text-amber-200 rounded-lg p-3 mb-4">
+                <p className="font-semibold mb-1">
+                  🔊 Audio Dolby (AC-3) non supporté par ce navigateur
+                </p>
+                <p className="text-xs text-amber-200/80">
+                  La vidéo se décode (H.264) mais Chrome / Firefox refusent
+                  l&apos;audio AC-3 sans licence Dolby. C&apos;est très commun sur
+                  les chaînes IPTV live. Solutions :
+                </p>
+                <ul className="text-xs text-amber-200/80 mt-2 ml-4 list-disc space-y-0.5">
+                  <li>Ouvrir cette chaîne dans <strong>VLC</strong> (paste le lien M3U → chercher la chaîne)</li>
+                  <li>Utiliser <strong>Safari</strong> (macOS / iOS) qui supporte AC-3 nativement</li>
+                  <li>Chercher la même chaîne dans un autre bouquet avec audio AAC</li>
+                  <li>Sur Android TV : utiliser <strong>IPTV Smarters</strong> ou <strong>TiviMate</strong> (décodeurs natifs)</li>
+                </ul>
               </div>
             ) : null}
 

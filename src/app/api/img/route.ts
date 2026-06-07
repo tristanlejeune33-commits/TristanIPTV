@@ -55,6 +55,13 @@ export async function GET(req: NextRequest) {
     return emptyImage();
   }
 
+  // Bound the upstream fetch so a slow IPTV image host (covers-f.ddns.me is
+  // famously slow under load) can't burn the whole Vercel function budget.
+  // Better to give up at 6 s and show the gradient fallback than to 504 and
+  // pollute the browser's console with cascading errors.
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), 6000);
+
   try {
     const upstream = await fetch(target.toString(), {
       headers: {
@@ -63,7 +70,9 @@ export async function GET(req: NextRequest) {
       },
       redirect: "follow",
       cache: "no-store",
+      signal: controller.signal,
     });
+    clearTimeout(timeoutId);
 
     if (!upstream.ok) {
       // Don't propagate 4xx/5xx as image errors — return transparent so the
@@ -82,6 +91,7 @@ export async function GET(req: NextRequest) {
       },
     });
   } catch {
+    clearTimeout(timeoutId);
     return emptyImage();
   }
 }
