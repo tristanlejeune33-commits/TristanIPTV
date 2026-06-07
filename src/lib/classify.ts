@@ -117,23 +117,36 @@ export function detectType(input: {
   group: string;
   url: string;
 }): ContentType {
-  // 1. Group title is the strongest signal in IPTV playlists
+  const urlLower = input.url.toLowerCase();
+
+  // 1. Xtream Codes URL pattern is DEFINITIVE — the provider literally tells
+  //    us what it is in the path: /series/, /movie/, /live/. This wins over
+  //    everything else because providers often use confusing group titles
+  //    ("Spanish Drama", "ES| Series", etc.) but the URL never lies.
+  if (/\/series\//.test(urlLower)) return "series";
+  if (/\/movies?\//.test(urlLower)) return "movie";
+  if (/\/live\//.test(urlLower)) return "live";
+
+  // 2. Group title is the next strongest signal
   if (groupContainsAny(input.group, SERIES_GROUP_KEYWORDS)) return "series";
   if (groupContainsAny(input.group, MOVIE_GROUP_KEYWORDS)) return "movie";
 
-  // 2. URL extension as fallback for VOD
+  // 3. Name has S01E01 / 1x05 / Saison 1 Ep 5 → series regardless of group.
+  //    Catches non-French series in provider groups like "Spanish Drama" that
+  //    don't contain the word "series".
+  if (extractSeriesInfo(input.name)) return "series";
+
+  // 4. URL extension as fallback for VOD
   if (looksLikeVodUrl(input.url)) {
-    // VOD with episode pattern in name → series
-    if (extractSeriesInfo(input.name)) return "series";
     return "movie";
   }
 
-  // 3. HLS or live-keyword group → live channel
+  // 5. HLS or live-keyword group → live channel
   if (looksLikeHlsUrl(input.url) || groupContainsAny(input.group, LIVE_GROUP_KEYWORDS)) {
     return "live";
   }
 
-  // 4. Default to live (most IPTV content is live)
+  // 6. Default to live (most IPTV content is live)
   return "live";
 }
 

@@ -1,6 +1,27 @@
 import { classify, cleanDisplayName, type ContentType, type LangVariant, type SeriesInfo } from "./classify";
 
 /**
+ * Strip a trailing episode marker so series classified via URL but lacking a
+ * "S01E01" pattern in the title still group correctly. Handles:
+ *   "Gran Hotel - 01"      → "Gran Hotel"
+ *   "Gran Hotel - Ep 02"   → "Gran Hotel"
+ *   "Gran Hotel Episode 3" → "Gran Hotel"
+ *   "Show 1x05"            → "Show"
+ * Conservative: only strips at the END of the string, never in the middle.
+ */
+function deriveShowBase(name: string): string {
+  const cleaned = cleanDisplayName(name);
+  const stripped = cleaned
+    .replace(/\s*[-–|·:]\s*(?:ep|episode|épisode|chap|chapitre)\s*\d{1,4}\s*$/i, "")
+    .replace(/\s+(?:ep|episode|épisode|chap|chapitre)\s+\d{1,4}\s*$/i, "")
+    .replace(/\s+\d{1,3}\s*x\s*\d{1,3}\s*$/i, "")
+    .replace(/\s*[-–|·:]\s*\d{1,4}\s*$/i, "")
+    .trim();
+  // Refuse to return an empty or 1-char string — keep the original instead
+  return stripped.length >= 2 ? stripped : cleaned || name;
+}
+
+/**
  * M3U / M3U8 playlist parser tailored for IPTV playlists.
  * Handles `#EXTINF` attributes (tvg-id, tvg-name, tvg-logo, group-title, tvg-country, tvg-language)
  * and the optional `#EXTGRP` directive.
@@ -212,10 +233,13 @@ export function parseM3U(text: string): ParsedPlaylist {
   const shows: Record<string, ShowGroup> = {};
   for (const ep of seriesEpisodes) {
     const info = ep.seriesInfo;
-    const showName = info?.show
-      ? cleanDisplayName(info.show)
-      : ep.displayName;
-    const showSlug = info?.showSlug ?? slugify(ep.name);
+    // When seriesInfo is missing (e.g. classified as series by URL but the
+    // name doesn't have a standard SxxEyy marker), derive a show base from
+    // the cleaned name so all "Gran Hotel - 01", "Gran Hotel - 02"… still
+    // collapse into a single show.
+    const fallbackBase = deriveShowBase(ep.name);
+    const showName = info?.show ? cleanDisplayName(info.show) : fallbackBase;
+    const showSlug = info?.showSlug ?? slugify(fallbackBase);
     if (!shows[showSlug]) {
       shows[showSlug] = {
         show: showName,
