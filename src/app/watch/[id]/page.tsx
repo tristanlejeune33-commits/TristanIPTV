@@ -22,33 +22,31 @@ function formatTime(seconds: number): string {
 
 const AUTOPLAY_COUNTDOWN_SECONDS = 7;
 
-export default function WatchPageWrapper({
-  params,
-}: {
-  params: Promise<{ id: string }>;
-}) {
-  // useSearchParams() in this page requires a Suspense boundary on Next.js 15+
-  // otherwise the route 500s during the build / first SSR pass.
-  return (
-    <Suspense
-      fallback={
-        <div className="fixed inset-0 bg-black grid place-items-center">
-          <div className="h-10 w-10 border-4 border-border border-t-[var(--accent)] rounded-full animate-spin" />
-        </div>
-      }
-    >
-      <WatchPage params={params} />
-    </Suspense>
-  );
-}
+const SuspenseFallback = (
+  <div className="fixed inset-0 bg-black grid place-items-center">
+    <div className="h-10 w-10 border-4 border-border border-t-[var(--accent)] rounded-full animate-spin" />
+  </div>
+);
 
-function WatchPage({
+export default function WatchPageWrapper({
   params,
 }: {
   params: Promise<{ id: string }>;
 }) {
   const { id: rawId } = use(params);
   const id = decodeURIComponent(rawId);
+
+  // useSearchParams() in WatchPage requires a Suspense boundary on Next.js
+  // 15+ otherwise the route 500s during SSR. Resolving params at the wrapper
+  // level avoids double-suspending and surfaces errors closer to the source.
+  return (
+    <Suspense fallback={SuspenseFallback}>
+      <WatchPage id={id} />
+    </Suspense>
+  );
+}
+
+function WatchPage({ id }: { id: string }) {
   const router = useRouter();
   const searchParams = useSearchParams();
 
